@@ -1,3 +1,4 @@
+import { createServer } from "node:http";
 import cors from "cors";
 import express from "express";
 import argon2 from "argon2";
@@ -13,6 +14,7 @@ import {
   upsertDoc,
 } from "./db.js";
 import { DEMO_USER_ID, ensureDemoPreset } from "./sampleData.js";
+import { initRealtime } from "./realtime.js";
 import { applyMove, createGameFromSetup, deserializeGame, serializeGame } from "@cv/engine";
 import type { CompactMove } from "@cv/engine";
 import type { BoardDefinition, GameSetup, PieceTypeDefinition } from "@cv/shared";
@@ -38,6 +40,8 @@ ensureDemoPreset();
 const app = express();
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: "1mb" }));
+const httpServer = createServer(app);
+const realtime = initRealtime(httpServer);
 
 function parseCookies(raw: string | undefined): Record<string, string> {
   if (!raw) return {};
@@ -368,6 +372,7 @@ app.post("/api/friends/requests", requireAuth, (req: AuthRequest, res) => {
      VALUES (?, ?, ?, 'pending', ?, NULL)`
   ).run(requestId, fromUserId, toUserId, ts);
 
+  realtime.notifyLobbyUsers([fromUserId, toUserId], "friend_request_created");
   res.status(201).json({
     request: { id: requestId, fromUserId, toUserId, status: "pending", createdAt: ts },
   });
@@ -432,6 +437,7 @@ app.post("/api/friends/requests/:id/accept", requireAuth, (req: AuthRequest, res
   const friendship = db
     .prepare("SELECT * FROM friendships WHERE user_a_id = ? AND user_b_id = ?")
     .get(userA, userB) as any;
+  realtime.notifyLobbyUsers([fr.from_user_id, fr.to_user_id], "friend_request_accepted");
   res.json({ friendship });
 });
 
@@ -450,6 +456,7 @@ app.post("/api/friends/requests/:id/decline", requireAuth, (req: AuthRequest, re
     return;
   }
   db.prepare("UPDATE friend_requests SET status = 'declined', responded_at = ? WHERE id = ?").run(nowIso(), id);
+  realtime.notifyLobbyUsers([fr.from_user_id, fr.to_user_id], "friend_request_declined");
   res.json({ ok: true });
 });
 
@@ -505,6 +512,7 @@ app.post("/api/game-invites", requireAuth, (req: AuthRequest, res) => {
      VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, NULL)`
   ).run(inviteId, fromUserId, toUserId, mode, customSetupId, expiresAt, ts);
 
+  realtime.notifyLobbyUsers([fromUserId, toUserId], "game_invite_created");
   res.status(201).json({
     invite: { id: inviteId, fromUserId, toUserId, mode, customSetupId, status: "pending", expiresAt, createdAt: ts },
   });
@@ -564,6 +572,8 @@ app.post("/api/game-invites/:id/accept", requireAuth, (req: AuthRequest, res) =>
   try {
     const { gameId } = createGameFromInvite(invite.mode, invite.from_user_id, invite.to_user_id, invite.custom_setup_id);
     db.prepare("UPDATE game_invites SET status = 'accepted', responded_at = ? WHERE id = ?").run(ts, inviteId);
+    realtime.notifyLobbyUsers([invite.from_user_id, invite.to_user_id], "game_invite_accepted");
+    realtime.pushGameUpdate(gameId, "game_created");
     const game = db.prepare("SELECT * FROM games WHERE id = ?").get(gameId);
     res.status(201).json({ game });
   } catch (err) {
@@ -583,6 +593,7 @@ app.post("/api/game-invites/:id/decline", requireAuth, (req: AuthRequest, res) =
     return;
   }
   db.prepare("UPDATE game_invites SET status = 'declined', responded_at = ? WHERE id = ?").run(nowIso(), req.params.id);
+  realtime.notifyLobbyUsers([invite.from_user_id, invite.to_user_id], "game_invite_declined");
   res.json({ ok: true });
 });
 
@@ -598,6 +609,7 @@ app.post("/api/game-invites/:id/cancel", requireAuth, (req: AuthRequest, res) =>
     return;
   }
   db.prepare("UPDATE game_invites SET status = 'cancelled', responded_at = ? WHERE id = ?").run(nowIso(), req.params.id);
+  realtime.notifyLobbyUsers([invite.from_user_id, invite.to_user_id], "game_invite_cancelled");
   res.json({ ok: true });
 });
 
@@ -737,6 +749,7 @@ app.post("/api/games/:id/moves", requireAuth, (req: AuthRequest, res) => {
       ).run(newId("gm"), game.id, ply, me, JSON.stringify(move), ts);
     })();
 
+    realtime.pushGameUpdate(game.id, "move_applied");
     res.json({ appliedMove: move, nextState: serializedNext, gameStatus: nextState.status });
   } catch (err) {
     res.status(409).json({ error: `illegal move: ${(err as Error).message}` });
@@ -765,6 +778,7 @@ app.post("/api/games/:id/resign", requireAuth, (req: AuthRequest, res) => {
     nowIso(),
     game.id
   );
+  realtime.pushGameUpdate(game.id, "resign");
   res.json({ ok: true, winnerUserId });
 });
 
@@ -788,6 +802,7 @@ app.post("/api/games/:id/draw-offer", requireAuth, (req: AuthRequest, res) => {
     return;
   }
   db.prepare("UPDATE games SET draw_offered_by_user_id = ?, updated_at = ? WHERE id = ?").run(me, nowIso(), game.id);
+  realtime.pushGameUpdate(game.id, "draw_offer");
   res.json({ ok: true });
 });
 
@@ -813,6 +828,7 @@ app.post("/api/games/:id/draw-accept", requireAuth, (req: AuthRequest, res) => {
   db.prepare(
     "UPDATE games SET status = 'draw', draw_offered_by_user_id = NULL, updated_at = ? WHERE id = ?"
   ).run(nowIso(), game.id);
+  realtime.pushGameUpdate(game.id, "draw_accepted");
   res.json({ ok: true });
 });
 
@@ -836,6 +852,7 @@ app.post("/api/games/:id/draw-decline", requireAuth, (req: AuthRequest, res) => 
     return;
   }
   db.prepare("UPDATE games SET draw_offered_by_user_id = NULL, updated_at = ? WHERE id = ?").run(nowIso(), game.id);
+  realtime.pushGameUpdate(game.id, "draw_declined");
   res.json({ ok: true });
 });
 
@@ -909,6 +926,6 @@ app.get("/api/setup-bundle/:id", requireAuth, (req: AuthRequest, res) => {
   res.json({ setup, board, pieceTypes: setup.pieceTypes });
 });
 
-app.listen(PORT, () => {
+httpServer.listen(PORT, () => {
   console.log(`[cv-server] http://localhost:${PORT}`);
 });

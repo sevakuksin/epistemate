@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import type { GameSetup } from "@cv/shared";
 import { api, type Friend, type FriendRequest, type GameInvite, type User } from "../api";
+import { wsClient } from "../realtime/wsClient";
 import { useAuth } from "../state/auth";
 
 type PlayMode = "chess" | "epistemate" | "custom";
@@ -21,6 +22,7 @@ export function VsPlayerPage() {
   const [setups, setSetups] = useState<GameSetup[]>([]);
   const [customSetupId, setCustomSetupId] = useState("");
   const [status, setStatus] = useState("");
+  const [onlineUserIds, setOnlineUserIds] = useState<Set<string>>(new Set());
 
   async function refresh() {
     if (!user) return;
@@ -47,6 +49,29 @@ export function VsPlayerPage() {
     void refresh().catch((e) => setStatus(e instanceof Error ? e.message : "Failed to load online lobby"));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
+
+  useEffect(() => {
+    const unsub = wsClient.addListener((event) => {
+      if (event.type === "presence") {
+        setOnlineUserIds(new Set(event.onlineUserIds));
+        return;
+      }
+      if (event.type === "welcome" || event.type === "ws_connected") {
+        void refresh().catch(() => {
+          // noop
+        });
+        return;
+      }
+      if (event.type === "lobby_updated" || event.type === "game_updated") {
+        void refresh().catch(() => {
+          // noop
+        });
+      }
+    });
+
+    return () => unsub();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, customSetupId]);
 
   async function doSearch() {
     if (!query.trim()) {
@@ -129,12 +154,15 @@ export function VsPlayerPage() {
         <div className="card" style={{ flex: 1 }}>
           <h3>Friends</h3>
           <ul>
-            {friends.map((f) => (
-              <li key={f.id} className="row" style={{ justifyContent: "space-between" }}>
-                <span>{f.username}</span>
-                <button onClick={() => void inviteFriend(f.id)}>Invite ({mode})</button>
-              </li>
-            ))}
+            {friends.map((f) => {
+              const online = onlineUserIds.has(f.id);
+              return (
+                <li key={f.id} className="row" style={{ justifyContent: "space-between" }}>
+                  <span>{f.username} {online ? "(online)" : "(offline)"}</span>
+                  <button onClick={() => void inviteFriend(f.id)}>Invite ({mode})</button>
+                </li>
+              );
+            })}
           </ul>
         </div>
 

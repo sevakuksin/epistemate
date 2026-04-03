@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import type { CompactMove, GameState } from "@cv/engine";
-import { applyMove, deserializeGame, generatePseudoLegalMoves } from "@cv/engine";
+import { deserializeGame, generatePseudoLegalMoves } from "@cv/engine";
 import type { GameSetup, PieceInstance } from "@cv/shared";
 import { api, type GameRecord } from "../api";
+import { wsClient } from "../realtime/wsClient";
 import { useAuth } from "../state/auth";
 
 function squareColor(x: number, y: number): "light" | "dark" {
@@ -76,28 +77,60 @@ export function OnlineGamePage() {
       .catch((e) => setStatus(e instanceof Error ? e.message : "Failed to load game"))
       .finally(() => setLoading(false));
 
-    const id = window.setInterval(() => {
+    const unsubscribeGame = wsClient.subscribeGame(gameId);
+    const unsubscribeListener = wsClient.addListener((event) => {
+      if (event.type === "ws_connected") {
+        wsClient.requestGameSync(gameId);
+        return;
+      }
+      if (event.type === "game_updated" && event.gameId === gameId) {
+        wsClient.requestGameSync(gameId);
+        return;
+      }
+      if (event.type === "game_snapshot" && event.gameId === gameId) {
+        setGame(event.game as GameRecord);
+        setSetup(JSON.parse((event.game as GameRecord).setup_json) as GameSetup);
+        setState(deserializeGame(event.state));
+      }
+    });
+
+    const fallbackId = window.setInterval(() => {
       void refresh().catch(() => {
         // keep last state
       });
-    }, 2000);
-    return () => window.clearInterval(id);
+    }, 30000);
+
+    return () => {
+      unsubscribeGame();
+      unsubscribeListener();
+      window.clearInterval(fallbackId);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gameId]);
 
-  function onSquareClick(x: number, y: number) {
+  function onSquareClick(displayX: number, displayY: number) {
     if (!state || !game || !mySide) return;
     if (game.status !== "active") return;
+
+    const real = coordFromDisplay(
+      displayX,
+      displayY,
+      state.board.width,
+      state.board.height,
+      boardFlipped
+    );
+    const x = real.x;
+    const y = real.y;
 
     const turnSide = state.sides[state.currentTurnIndex];
     const clickedMove = legalMoves.find((m) => coordMatch(m.to, { x, y }));
     if (clickedMove) {
       void api
         .playMove(game.id, clickedMove)
-        .then(async () => {
+        .then(() => {
           setSelectedPieceId(null);
           setLegalMoves([]);
-          await refresh();
+          if (gameId) wsClient.requestGameSync(gameId);
         })
         .catch((e) => setStatus(e instanceof Error ? e.message : "Move failed"));
       return;
@@ -122,7 +155,7 @@ export function OnlineGamePage() {
     if (!gameId) return;
     try {
       await api.offerDraw(gameId);
-      await refresh();
+      wsClient.requestGameSync(gameId);
     } catch (e) {
       setStatus(e instanceof Error ? e.message : "Draw offer failed");
     }
@@ -132,7 +165,7 @@ export function OnlineGamePage() {
     if (!gameId) return;
     try {
       await api.acceptDraw(gameId);
-      await refresh();
+      wsClient.requestGameSync(gameId);
     } catch (e) {
       setStatus(e instanceof Error ? e.message : "Draw accept failed");
     }
@@ -142,7 +175,7 @@ export function OnlineGamePage() {
     if (!gameId) return;
     try {
       await api.declineDraw(gameId);
-      await refresh();
+      wsClient.requestGameSync(gameId);
     } catch (e) {
       setStatus(e instanceof Error ? e.message : "Draw decline failed");
     }
@@ -152,7 +185,7 @@ export function OnlineGamePage() {
     if (!gameId) return;
     try {
       await api.resign(gameId);
-      await refresh();
+      wsClient.requestGameSync(gameId);
     } catch (e) {
       setStatus(e instanceof Error ? e.message : "Resign failed");
     }
@@ -216,7 +249,7 @@ export function OnlineGamePage() {
                       key={`${x},${y}`}
                       type="button"
                       className={`square ${squareColor(x, y)} ${isSelected ? "selected" : ""} ${isLegal ? "legal" : ""}`}
-                      onClick={() => onSquareClick(x, y)}
+                      onClick={() => onSquareClick(displayX, displayY)}
                       title={`${x},${y}`}
                     >
                       {piece && setup ? (

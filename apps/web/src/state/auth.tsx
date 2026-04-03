@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { api, type User } from "../api";
+import { wsClient } from "../realtime/wsClient";
 
 type AuthContextValue = {
   user: User | null;
@@ -34,6 +35,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       mounted = false;
     };
   }, []);
+
+
+
+  useEffect(() => {
+    if (user) {
+      wsClient.start();
+      return;
+    }
+    wsClient.stop();
+  }, [user?.id]);
 
   const value = useMemo<AuthContextValue>(
     () => ({
