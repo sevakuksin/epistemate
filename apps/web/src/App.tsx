@@ -5,11 +5,13 @@ import { HotSeatPage } from "./pages/HotSeatPage";
 import { CreatePage } from "./pages/CreatePage";
 import { PlaceholderPage } from "./pages/PlaceholderPage";
 import { VsPlayerPage } from "./pages/VsPlayerPage";
+import { OnlineGamePage } from "./pages/OnlineGamePage";
 import { RulebookPage } from "./pages/RulebookPage";
 import { useAuth } from "./state/auth";
 
 function Protected({ children }: { children: React.ReactNode }) {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
+  if (loading) return <div className="page"><p>Loading session...</p></div>;
   if (!user) return <Navigate to="/login" replace />;
   return <>{children}</>;
 }
@@ -47,6 +49,14 @@ export function App() {
         element={
           <Protected>
             <RulebookPage />
+          </Protected>
+        }
+      />
+      <Route
+        path="/play/vs-player/game/:gameId"
+        element={
+          <Protected>
+            <OnlineGamePage />
           </Protected>
         }
       />

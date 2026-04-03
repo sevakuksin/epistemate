@@ -35,8 +35,7 @@ export function MenuPage() {
           <span>Logged in as: {user?.username}</span>
           <button
             onClick={() => {
-              logout();
-              navigate("/login");
+              void logout().then(() => navigate("/login"));
             }}
           >
             Logout

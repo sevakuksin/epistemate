@@ -1,45 +1,59 @@
-import { createContext, useContext, useMemo, useState } from "react";
-
-type User = {
-  id: string;
-  username: string;
-};
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { api, type User } from "../api";
 
 type AuthContextValue = {
   user: User | null;
+  loading: boolean;
   login: (user: User) => void;
-  logout: () => void;
+  logout: () => Promise<void>;
 };
 
-const KEY = "cv_current_user";
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-function loadUser(): User | null {
-  const raw = localStorage.getItem(KEY);
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as User;
-  } catch {
-    return null;
-  }
-}
-
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(() => loadUser());
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let mounted = true;
+    api
+      .me()
+      .then((r) => {
+        if (!mounted) return;
+        setUser(r.user);
+      })
+      .catch(() => {
+        if (!mounted) return;
+        setUser(null);
+      })
+      .finally(() => {
+        if (!mounted) return;
+        setLoading(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
   const value = useMemo<AuthContextValue>(
     () => ({
       user,
+      loading,
       login(next) {
         setUser(next);
-        localStorage.setItem(KEY, JSON.stringify(next));
       },
-      logout() {
+      async logout() {
+        try {
+          await api.logout();
+        } catch {
+          // noop
+        }
         setUser(null);
-        localStorage.removeItem(KEY);
       },
     }),
-    [user]
+    [user, loading]
   );
+
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
