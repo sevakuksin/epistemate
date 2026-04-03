@@ -1,4 +1,4 @@
-import type { BoardDefinition, GameSetup, PieceTypeDefinition } from "@cv/shared";
+import type { BoardDefinition, GameSetup, PieceInstance, PieceTypeDefinition } from "@cv/shared";
 import type { CompactMove } from "@cv/engine";
 
 export type User = { id: string; username: string };
@@ -32,10 +32,19 @@ export type GameInvite = {
   to_username?: string;
 };
 
+export type OnlineDraftState = {
+  kind: "epistemateDraft";
+  activeSide: "white" | "black";
+  stage: "buy" | "place";
+  startingBudget: number;
+  buyCounts: Record<string, { white: number; black: number }>;
+  placements: { white: PieceInstance[]; black: PieceInstance[] };
+};
+
 export type GameRecord = {
   id: string;
   mode: "chess" | "epistemate" | "custom";
-  status: "active" | "finished" | "draw";
+  status: "draft" | "active" | "finished" | "draw";
   white_user_id: string;
   black_user_id: string;
   current_turn_side: "white" | "black";
@@ -147,6 +156,36 @@ export const api = {
   gameMoves(gameId: string, from = 0, limit = 100) {
     return request<{ moves: any[] }>(`/api/games/${gameId}/moves?from=${from}&limit=${limit}`);
   },
+  draftAdjustBuy(gameId: string, pieceId: string, delta: number) {
+    return request<{ ok: boolean }>(`/api/games/${gameId}/draft/buy`, {
+      method: "POST",
+      body: JSON.stringify({ pieceId, delta }),
+    });
+  },
+  draftPlace(gameId: string, typeId: string, x: number, y: number) {
+    return request<{ ok: boolean }>(`/api/games/${gameId}/draft/place`, {
+      method: "POST",
+      body: JSON.stringify({ typeId, x, y }),
+    });
+  },
+  draftMove(gameId: string, instanceId: string, x: number, y: number) {
+    return request<{ ok: boolean }>(`/api/games/${gameId}/draft/move`, {
+      method: "POST",
+      body: JSON.stringify({ instanceId, x, y }),
+    });
+  },
+  draftTakeback(gameId: string, instanceId: string) {
+    return request<{ ok: boolean }>(`/api/games/${gameId}/draft/takeback`, {
+      method: "POST",
+      body: JSON.stringify({ instanceId }),
+    });
+  },
+  draftConfirm(gameId: string) {
+    return request<{ ok: boolean; status: "draft" | "active" }>(`/api/games/${gameId}/draft/confirm`, {
+      method: "POST",
+    });
+  },
+
   playMove(gameId: string, move: CompactMove) {
     return request<{ appliedMove: CompactMove; nextState: any; gameStatus: string }>(`/api/games/${gameId}/moves`, {
       method: "POST",

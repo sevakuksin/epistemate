@@ -14,6 +14,16 @@ import {
   upsertDoc,
 } from "./db.js";
 import { DEMO_USER_ID, ensureDemoPreset } from "./sampleData.js";
+import {
+  adjustDraftBuy,
+  confirmDraftPhase,
+  createInitialEpistemateDraft,
+  movePlacedPiece,
+  parseEpistemateDraft,
+  placeFromPool,
+  takeBackPlacedPiece,
+  type Side,
+} from "./epistemateDraft.js";
 import { initRealtime } from "./realtime.js";
 import { applyMove, createGameFromSetup, deserializeGame, serializeGame } from "@cv/engine";
 import type { CompactMove } from "@cv/engine";
@@ -130,6 +140,12 @@ function otherUserId(game: { white_user_id: string; black_user_id: string }, act
   return actorUserId === game.white_user_id ? game.black_user_id : game.white_user_id;
 }
 
+function gameSideForUser(game: { white_user_id: string; black_user_id: string }, userId: string): Side | null {
+  if (game.white_user_id === userId) return "white";
+  if (game.black_user_id === userId) return "black";
+  return null;
+}
+
 function loadBundleFromDocs(ownerUserId: string, setupId: string): { setup: GameSetup; board: BoardDefinition } | null {
   const setup = getDoc("setup", ownerUserId, setupId) as GameSetup | null;
   if (!setup) return null;
@@ -139,17 +155,8 @@ function loadBundleFromDocs(ownerUserId: string, setupId: string): { setup: Game
 }
 
 function loadBuiltInBundle(mode: GameMode): { setup: GameSetup; board: BoardDefinition } | null {
-  // For online v1, both chess and epistemate use a playable seeded setup.
-  const setupId = "setup_classic_8x8";
-  const fromDemo = loadBundleFromDocs(DEMO_USER_ID, setupId);
-  if (!fromDemo) return null;
-  if (mode === "epistemate") {
-    return {
-      setup: { ...fromDemo.setup, name: "Epistemate (online v1 classic start)" },
-      board: fromDemo.board,
-    };
-  }
-  return fromDemo;
+  const setupId = mode === "epistemate" ? "setup_epistemate" : "setup_classic_8x8";
+  return loadBundleFromDocs(DEMO_USER_ID, setupId);
 }
 
 function createGameFromInvite(
@@ -172,11 +179,37 @@ function createGameFromInvite(
 
   if (!bundle) throw new Error("failed to load game setup");
 
-  const initial = createGameFromSetup(bundle.setup, bundle.board);
-  const snapshot = serializeGame(initial);
   const ts = nowIso();
   const gameId = newId("game");
 
+  if (mode === "epistemate" && bundle.setup.budgetMode?.enabled) {
+    const draft = createInitialEpistemateDraft(bundle.setup);
+    db.prepare(
+      `INSERT INTO games (
+        id, mode, status, white_user_id, black_user_id, current_turn_side,
+        winner_user_id, draw_offered_by_user_id,
+        board_json, setup_json, state_json, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      gameId,
+      mode,
+      "draft",
+      whiteUserId,
+      blackUserId,
+      draft.activeSide,
+      null,
+      null,
+      JSON.stringify(bundle.board),
+      JSON.stringify(bundle.setup),
+      JSON.stringify(draft),
+      ts,
+      ts
+    );
+    return { gameId };
+  }
+
+  const initial = createGameFromSetup(bundle.setup, bundle.board);
+  const snapshot = serializeGame(initial);
   db.prepare(
     `INSERT INTO games (
       id, mode, status, white_user_id, black_user_id, current_turn_side,
@@ -617,21 +650,32 @@ app.post("/api/game-invites/:id/cancel", requireAuth, (req: AuthRequest, res) =>
 app.get("/api/games", requireAuth, (req: AuthRequest, res) => {
   const me = req.userId!;
   const status = req.query.status ? String(req.query.status) : null;
-  const rows = status
-    ? db
-        .prepare(
-          `SELECT * FROM games
-           WHERE (white_user_id = ? OR black_user_id = ?) AND status = ?
-           ORDER BY updated_at DESC`
-        )
-        .all(me, me, status)
-    : db
-        .prepare(
-          `SELECT * FROM games
-           WHERE (white_user_id = ? OR black_user_id = ?)
-           ORDER BY updated_at DESC`
-        )
-        .all(me, me);
+  let rows: any[] = [];
+  if (!status) {
+    rows = db
+      .prepare(
+        `SELECT * FROM games
+         WHERE (white_user_id = ? OR black_user_id = ?)
+         ORDER BY updated_at DESC`
+      )
+      .all(me, me) as any[];
+  } else if (status === "active") {
+    rows = db
+      .prepare(
+        `SELECT * FROM games
+         WHERE (white_user_id = ? OR black_user_id = ?) AND status IN ('active', 'draft')
+         ORDER BY updated_at DESC`
+      )
+      .all(me, me) as any[];
+  } else {
+    rows = db
+      .prepare(
+        `SELECT * FROM games
+         WHERE (white_user_id = ? OR black_user_id = ?) AND status = ?
+         ORDER BY updated_at DESC`
+      )
+      .all(me, me, status) as any[];
+  }
   res.json({ games: rows });
 });
 
@@ -685,6 +729,227 @@ app.get("/api/games/:id/moves", requireAuth, (req: AuthRequest, res) => {
     )
     .all(req.params.id, from, limit);
   res.json({ moves: rows });
+});
+
+app.post("/api/games/:id/draft/buy", requireAuth, (req: AuthRequest, res) => {
+  const me = req.userId!;
+  const pieceId = String(req.body?.pieceId ?? "").trim();
+  const delta = Number(req.body?.delta ?? 0);
+  if (!pieceId || !Number.isFinite(delta)) {
+    res.status(400).json({ error: "pieceId and delta are required" });
+    return;
+  }
+  const game = db.prepare("SELECT * FROM games WHERE id = ?").get(req.params.id) as any;
+  if (!game) {
+    res.status(404).json({ error: "game not found" });
+    return;
+  }
+  const side = gameSideForUser(game, me);
+  if (!side) {
+    res.status(403).json({ error: "forbidden" });
+    return;
+  }
+  if (game.mode !== "epistemate" || game.status !== "draft") {
+    res.status(409).json({ error: "game is not in epistemate draft" });
+    return;
+  }
+
+  try {
+    const setup = JSON.parse(game.setup_json) as GameSetup;
+    const draft = parseEpistemateDraft(JSON.parse(game.state_json));
+    const nextDraft = adjustDraftBuy(setup, draft, side, pieceId, delta);
+    db.prepare("UPDATE games SET state_json = ?, current_turn_side = ?, updated_at = ? WHERE id = ?").run(
+      JSON.stringify(nextDraft),
+      nextDraft.activeSide,
+      nowIso(),
+      game.id
+    );
+    realtime.pushGameUpdate(game.id, "draft_buy_adjusted");
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(409).json({ error: (err as Error).message });
+  }
+});
+
+app.post("/api/games/:id/draft/place", requireAuth, (req: AuthRequest, res) => {
+  const me = req.userId!;
+  const typeId = String(req.body?.typeId ?? "").trim();
+  const x = Number(req.body?.x);
+  const y = Number(req.body?.y);
+  if (!typeId || !Number.isFinite(x) || !Number.isFinite(y)) {
+    res.status(400).json({ error: "typeId, x and y are required" });
+    return;
+  }
+  const game = db.prepare("SELECT * FROM games WHERE id = ?").get(req.params.id) as any;
+  if (!game) {
+    res.status(404).json({ error: "game not found" });
+    return;
+  }
+  const side = gameSideForUser(game, me);
+  if (!side) {
+    res.status(403).json({ error: "forbidden" });
+    return;
+  }
+  if (game.mode !== "epistemate" || game.status !== "draft") {
+    res.status(409).json({ error: "game is not in epistemate draft" });
+    return;
+  }
+
+  try {
+    const setup = JSON.parse(game.setup_json) as GameSetup;
+    const board = JSON.parse(game.board_json) as BoardDefinition;
+    const draft = parseEpistemateDraft(JSON.parse(game.state_json));
+    const nextDraft = placeFromPool(setup, board, draft, side, typeId, Math.trunc(x), Math.trunc(y));
+    db.prepare("UPDATE games SET state_json = ?, current_turn_side = ?, updated_at = ? WHERE id = ?").run(
+      JSON.stringify(nextDraft),
+      nextDraft.activeSide,
+      nowIso(),
+      game.id
+    );
+    realtime.pushGameUpdate(game.id, "draft_piece_placed");
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(409).json({ error: (err as Error).message });
+  }
+});
+
+app.post("/api/games/:id/draft/move", requireAuth, (req: AuthRequest, res) => {
+  const me = req.userId!;
+  const instanceId = String(req.body?.instanceId ?? "").trim();
+  const x = Number(req.body?.x);
+  const y = Number(req.body?.y);
+  if (!instanceId || !Number.isFinite(x) || !Number.isFinite(y)) {
+    res.status(400).json({ error: "instanceId, x and y are required" });
+    return;
+  }
+  const game = db.prepare("SELECT * FROM games WHERE id = ?").get(req.params.id) as any;
+  if (!game) {
+    res.status(404).json({ error: "game not found" });
+    return;
+  }
+  const side = gameSideForUser(game, me);
+  if (!side) {
+    res.status(403).json({ error: "forbidden" });
+    return;
+  }
+  if (game.mode !== "epistemate" || game.status !== "draft") {
+    res.status(409).json({ error: "game is not in epistemate draft" });
+    return;
+  }
+
+  try {
+    const board = JSON.parse(game.board_json) as BoardDefinition;
+    const draft = parseEpistemateDraft(JSON.parse(game.state_json));
+    const nextDraft = movePlacedPiece(board, draft, side, instanceId, Math.trunc(x), Math.trunc(y));
+    db.prepare("UPDATE games SET state_json = ?, current_turn_side = ?, updated_at = ? WHERE id = ?").run(
+      JSON.stringify(nextDraft),
+      nextDraft.activeSide,
+      nowIso(),
+      game.id
+    );
+    realtime.pushGameUpdate(game.id, "draft_piece_moved");
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(409).json({ error: (err as Error).message });
+  }
+});
+
+app.post("/api/games/:id/draft/takeback", requireAuth, (req: AuthRequest, res) => {
+  const me = req.userId!;
+  const instanceId = String(req.body?.instanceId ?? "").trim();
+  if (!instanceId) {
+    res.status(400).json({ error: "instanceId is required" });
+    return;
+  }
+  const game = db.prepare("SELECT * FROM games WHERE id = ?").get(req.params.id) as any;
+  if (!game) {
+    res.status(404).json({ error: "game not found" });
+    return;
+  }
+  const side = gameSideForUser(game, me);
+  if (!side) {
+    res.status(403).json({ error: "forbidden" });
+    return;
+  }
+  if (game.mode !== "epistemate" || game.status !== "draft") {
+    res.status(409).json({ error: "game is not in epistemate draft" });
+    return;
+  }
+
+  try {
+    const draft = parseEpistemateDraft(JSON.parse(game.state_json));
+    const nextDraft = takeBackPlacedPiece(draft, side, instanceId);
+    db.prepare("UPDATE games SET state_json = ?, current_turn_side = ?, updated_at = ? WHERE id = ?").run(
+      JSON.stringify(nextDraft),
+      nextDraft.activeSide,
+      nowIso(),
+      game.id
+    );
+    realtime.pushGameUpdate(game.id, "draft_piece_takeback");
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(409).json({ error: (err as Error).message });
+  }
+});
+
+app.post("/api/games/:id/draft/confirm", requireAuth, (req: AuthRequest, res) => {
+  const me = req.userId!;
+  const game = db.prepare("SELECT * FROM games WHERE id = ?").get(req.params.id) as any;
+  if (!game) {
+    res.status(404).json({ error: "game not found" });
+    return;
+  }
+  const side = gameSideForUser(game, me);
+  if (!side) {
+    res.status(403).json({ error: "forbidden" });
+    return;
+  }
+  if (game.mode !== "epistemate" || game.status !== "draft") {
+    res.status(409).json({ error: "game is not in epistemate draft" });
+    return;
+  }
+
+  try {
+    const setup = JSON.parse(game.setup_json) as GameSetup;
+    const board = JSON.parse(game.board_json) as BoardDefinition;
+    const draft = parseEpistemateDraft(JSON.parse(game.state_json));
+    const result = confirmDraftPhase(setup, board, draft, side);
+    const ts = nowIso();
+    if (result.kind === "draft") {
+      db.prepare("UPDATE games SET state_json = ?, current_turn_side = ?, updated_at = ? WHERE id = ?").run(
+        JSON.stringify(result.draft),
+        result.draft.activeSide,
+        ts,
+        game.id
+      );
+      realtime.pushGameUpdate(game.id, "draft_phase_confirmed");
+      res.json({ ok: true, status: "draft" });
+      return;
+    }
+
+    db.prepare(
+      `UPDATE games SET
+        status = 'active',
+        setup_json = ?,
+        state_json = ?,
+        current_turn_side = ?,
+        updated_at = ?,
+        draw_offered_by_user_id = NULL,
+        winner_user_id = NULL
+       WHERE id = ?`
+    ).run(
+      JSON.stringify(result.setup),
+      JSON.stringify(result.state),
+      result.nextTurnSide,
+      ts,
+      game.id
+    );
+
+    realtime.pushGameUpdate(game.id, "draft_completed_game_started");
+    res.json({ ok: true, status: "active" });
+  } catch (err) {
+    res.status(409).json({ error: (err as Error).message });
+  }
 });
 
 app.post("/api/games/:id/moves", requireAuth, (req: AuthRequest, res) => {
