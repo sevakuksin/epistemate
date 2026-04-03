@@ -355,7 +355,7 @@ export function ensureDemoPreset(): void {
       { instanceId: "br1", typeId: "rook", side: "black", x: 5, y: 0, state: {} },
       { instanceId: "bw1", typeId: "wiggler", side: "black", x: 3, y: 0, state: {} },
     ],
-    budgetMode: { enabled: true, startingBudget: 40 },
+    budgetMode: { enabled: false, startingBudget: 40 },
   };
 
   const boardClassic: BoardDefinition = {
@@ -395,8 +395,9 @@ export function ensureDemoPreset(): void {
     pieceTypes: [king, queen, rook, bishop, knight, pawn],
     winCondition: { type: "captureTag", tag: "king" },
     placedPieces: classicPieces,
-    budgetMode: { enabled: true, startingBudget: 40 },
+    budgetMode: { enabled: false, startingBudget: 40 },
   };
+
 
   const catalog = [
     king,
@@ -415,6 +416,18 @@ export function ensureDemoPreset(): void {
     placebo,
   ];
 
+
+  const setupEpistemate: GameSetup = {
+    id: "setup_epistemate",
+    name: "Epistemate Budget Draft",
+    boardId: boardClassic.id,
+    sides: ["white", "black"],
+    pieceTypes: catalog,
+    winCondition: { type: "captureTag", tag: "king" },
+    placedPieces: [],
+    budgetMode: { enabled: true, startingBudget: 40 },
+  };
+
   for (const piece of catalog) {
     upsertDoc("piece_type", DEMO_USER_ID, piece.id, piece.name, piece);
   }
@@ -423,4 +436,5 @@ export function ensureDemoPreset(): void {
   upsertDoc("board", DEMO_USER_ID, boardClassic.id, boardClassic.name, boardClassic);
   upsertDoc("setup", DEMO_USER_ID, setupDemo.id, setupDemo.name, setupDemo);
   upsertDoc("setup", DEMO_USER_ID, setupClassic.id, setupClassic.name, setupClassic);
+  upsertDoc("setup", DEMO_USER_ID, setupEpistemate.id, setupEpistemate.name, setupEpistemate);
 }

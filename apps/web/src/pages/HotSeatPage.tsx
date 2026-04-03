@@ -12,6 +12,22 @@ type Bundle = {
 };
 
 type BuyCounts = Record<string, { white: number; black: number }>;
+type PlayMode = "chess" | "epistemate" | "custom";
+type Side = "white" | "black";
+
+type DraftState = {
+  activeSide: Side;
+  stage: "buy" | "place";
+  buyCounts: BuyCounts;
+  placements: Record<Side, PieceInstance[]>;
+};
+
+type DragPayload =
+  | { kind: "pool"; typeId: string; side: Side }
+  | { kind: "placed"; instanceId: string; side: Side };
+
+const CLASSIC_SETUP_ID = "setup_classic_8x8";
+const EPISTEMATE_SETUP_ID = "setup_epistemate";
 
 function pieceAssetForSide(setup: GameSetup, piece: PieceInstance): string | undefined {
   const typeDef = setup.pieceTypes.find((t) => t.id === piece.typeId);
@@ -20,6 +36,10 @@ function pieceAssetForSide(setup: GameSetup, piece: PieceInstance): string | und
     return typeDef.assetBySide?.[piece.side] ?? typeDef.asset;
   }
   return typeDef.asset;
+}
+
+function typeAssetForSide(typeDef: PieceTypeDefinition, side: Side): string {
+  return typeDef.assetBySide?.[side] ?? typeDef.asset;
 }
 
 function coordMatch(a: { x: number; y: number }, b: { x: number; y: number }): boolean {
@@ -45,60 +65,19 @@ function setupStartingBudget(setup: GameSetup): number {
   return setup.budgetMode?.startingBudget ?? 40;
 }
 
-function buildBudgetSetup(baseSetup: GameSetup, board: BoardDefinition, counts: BuyCounts): GameSetup {
-  const pieceTypes = baseSetup.pieceTypes;
-  const placements: PieceInstance[] = [];
+function isPlacementRow(side: Side, y: number, boardHeight: number): boolean {
+  return side === "white" ? y >= boardHeight - 2 : y <= 1;
+}
 
-  function positionsForSide(side: "white" | "black"): Array<{ x: number; y: number }> {
-    const out: Array<{ x: number; y: number }> = [];
-    const rows = Array.from({ length: board.height }).map((_, i) => i);
-    const orderedRows = side === "white" ? [...rows].reverse() : rows;
-    for (const y of orderedRows) {
-      for (let x = 0; x < board.width; x++) out.push({ x, y });
-    }
-    return out;
+function readDragPayload(raw: string): DragPayload | null {
+  try {
+    const parsed = JSON.parse(raw) as DragPayload;
+    if (parsed.kind !== "pool" && parsed.kind !== "placed") return null;
+    if (parsed.side !== "white" && parsed.side !== "black") return null;
+    return parsed;
+  } catch {
+    return null;
   }
-
-  for (const side of ["white", "black"] as const) {
-    const pos = positionsForSide(side);
-    let idx = 0;
-
-    const kingType = pieceTypes.find((p) => p.tags?.includes("king"));
-    if (kingType) {
-      const kPos = pos[idx++];
-      placements.push({
-        instanceId: `${side}_king_auto`,
-        typeId: kingType.id,
-        side,
-        x: kPos.x,
-        y: kPos.y,
-        state: {},
-      });
-    }
-
-    for (const piece of pieceTypes) {
-      const amount = counts[piece.id]?.[side] ?? 0;
-      for (let n = 0; n < amount; n++) {
-        if (idx >= pos.length) break;
-        const at = pos[idx++];
-        placements.push({
-          instanceId: `${side}_${piece.id}_${n + 1}`,
-          typeId: piece.id,
-          side,
-          x: at.x,
-          y: at.y,
-          state: {},
-        });
-      }
-    }
-  }
-
-  return {
-    ...baseSetup,
-    id: `${baseSetup.id}_budget_runtime`,
-    name: `${baseSetup.name} (Budget Buy)` ,
-    placedPieces: placements,
-  };
 }
 
 export function HotSeatPage() {
@@ -111,9 +90,10 @@ export function HotSeatPage() {
   const [selectedPieceId, setSelectedPieceId] = useState<string | null>(null);
   const [legalMoves, setLegalMoves] = useState<CompactMove[]>([]);
   const [error, setError] = useState("");
-  const [budgetPhase, setBudgetPhase] = useState(false);
-  const [buyCounts, setBuyCounts] = useState<BuyCounts>({});
   const [soundEnabled, setSoundEnabled] = useState(true);
+  const [playMode, setPlayMode] = useState<PlayMode | null>(null);
+  const [draft, setDraft] = useState<DraftState | null>(null);
+  const [placementSelectedPieceId, setPlacementSelectedPieceId] = useState<string | null>(null);
 
   const moveAudioRef = useRef<HTMLAudioElement | null>(null);
   const winAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -150,71 +130,309 @@ export function HotSeatPage() {
       .catch(() => setError("Failed to load setups."));
   }, [user]);
 
-  const currentBudget = useMemo(() => {
-    if (!bundle) return { white: 0, black: 0, max: 0 };
-    const max = setupStartingBudget(bundle.setup);
-    let spentWhite = 0;
-    let spentBlack = 0;
-    for (const p of bundle.setup.pieceTypes) {
-      const counts = buyCounts[p.id] ?? { white: 0, black: 0 };
-      const price = piecePrice(p);
-      spentWhite += counts.white * price;
-      spentBlack += counts.black * price;
-    }
-    return { white: max - spentWhite, black: max - spentBlack, max };
-  }, [bundle, buyCounts]);
+  const isDrafting = Boolean(draft && bundle);
 
-  async function loadSetup() {
-    if (!user || !selectedSetupId) return;
-    const data = await api.getSetupBundle(user.id, selectedSetupId);
+  const sideBudget = useMemo(() => {
+    if (!bundle || !draft) return { max: 0, remaining: 0, spent: 0, side: "white" as Side };
+    const side = draft.activeSide;
+    const max = setupStartingBudget(bundle.setup);
+    let spent = 0;
+    for (const piece of bundle.setup.pieceTypes) {
+      const isKing = piece.tags?.includes("king");
+      const price = isKing ? 0 : piecePrice(piece);
+      const count = draft.buyCounts[piece.id]?.[side] ?? 0;
+      spent += count * price;
+    }
+    return { max, spent, remaining: max - spent, side };
+  }, [bundle, draft]);
+
+  const draftAllPiecesOnBoard = useMemo(() => {
+    if (!draft) return [] as PieceInstance[];
+    return [...draft.placements.white, ...draft.placements.black];
+  }, [draft]);
+
+  const draftVisiblePiecesOnBoard = useMemo(() => {
+    if (!draft) return [] as PieceInstance[];
+    if (draft.activeSide === "black") return [...draft.placements.black];
+    return [...draft.placements.white, ...draft.placements.black];
+  }, [draft]);
+
+  function requiredCount(side: Side, typeId: string): number {
+    if (!draft) return 0;
+    return draft.buyCounts[typeId]?.[side] ?? 0;
+  }
+
+  function placedCount(side: Side, typeId: string): number {
+    if (!draft) return 0;
+    return draft.placements[side].filter((p) => p.typeId === typeId).length;
+  }
+
+  function remainingToPlace(side: Side, typeId: string): number {
+    return Math.max(0, requiredCount(side, typeId) - placedCount(side, typeId));
+  }
+
+  function initializeDraft(nextBundle: Bundle) {
+    const counts: BuyCounts = {};
+    for (const piece of nextBundle.setup.pieceTypes) {
+      const isKing = piece.tags?.includes("king");
+      counts[piece.id] = { white: isKing ? 1 : 0, black: isKing ? 1 : 0 };
+    }
+    setDraft({
+      activeSide: "white",
+      stage: "buy",
+      buyCounts: counts,
+      placements: { white: [], black: [] },
+    });
+  }
+
+  async function loadSetupById(setupId: string, forceBudget?: boolean) {
+    if (!user || !setupId) return;
+    const data = await api.getSetupBundle(user.id, setupId);
     const nextBundle: Bundle = { board: data.board, setup: data.setup };
     setBundle(nextBundle);
     setState(null);
     setActiveSetup(null);
     setSelectedPieceId(null);
     setLegalMoves([]);
+    setPlacementSelectedPieceId(null);
     setError("");
 
-    if (nextBundle.setup.budgetMode?.enabled) {
-      setBudgetPhase(true);
-      const initial: BuyCounts = {};
-      for (const piece of nextBundle.setup.pieceTypes) {
-        initial[piece.id] = { white: 0, black: 0 };
-      }
-      setBuyCounts(initial);
+    const useBudget = forceBudget ?? Boolean(nextBundle.setup.budgetMode?.enabled);
+    if (useBudget) {
+      initializeDraft(nextBundle);
     } else {
+      setDraft(null);
       const game = createGameFromSetup(nextBundle.setup, nextBundle.board);
       setState(game);
       setActiveSetup(nextBundle.setup);
-      setBudgetPhase(false);
     }
   }
 
-  function adjustBuy(pieceId: string, side: "white" | "black", delta: number) {
-    setBuyCounts((prev) => {
-      const current = prev[pieceId] ?? { white: 0, black: 0 };
+  async function chooseMode(mode: PlayMode) {
+    setPlayMode(mode);
+    setError("");
+    try {
+      if (mode === "chess") {
+        await loadSetupById(CLASSIC_SETUP_ID, false);
+        return;
+      }
+      if (mode === "epistemate") {
+        await loadSetupById(EPISTEMATE_SETUP_ID, true);
+        return;
+      }
+      setBundle(null);
+      setState(null);
+      setActiveSetup(null);
+      setDraft(null);
+      setPlacementSelectedPieceId(null);
+    } catch {
+      setError("Failed to load this mode. If you are on a new account, create/import setups first.");
+    }
+  }
+
+  async function loadCustomSetup() {
+    try {
+      await loadSetupById(selectedSetupId);
+    } catch {
+      setError("Failed to load custom setup.");
+    }
+  }
+
+  function resetToModePicker() {
+    setPlayMode(null);
+    setBundle(null);
+    setState(null);
+    setActiveSetup(null);
+    setDraft(null);
+    setSelectedPieceId(null);
+    setLegalMoves([]);
+    setPlacementSelectedPieceId(null);
+    setError("");
+  }
+
+  function adjustBuy(side: Side, pieceId: string, delta: number) {
+    if (!draft || !bundle) return;
+    const typeDef = bundle.setup.pieceTypes.find((p) => p.id === pieceId);
+    if (typeDef?.tags?.includes("king")) return;
+    setDraft((prev) => {
+      if (!prev) return prev;
+      const current = prev.buyCounts[pieceId] ?? { white: 0, black: 0 };
       const nextVal = Math.max(0, (current[side] ?? 0) + delta);
-      const next = {
+      return {
         ...prev,
-        [pieceId]: {
-          ...current,
-          [side]: nextVal,
+        buyCounts: {
+          ...prev.buyCounts,
+          [pieceId]: {
+            ...current,
+            [side]: nextVal,
+          },
         },
       };
-      return next;
     });
   }
 
-  function startBudgetGame() {
-    if (!bundle) return;
-    if (currentBudget.white < 0 || currentBudget.black < 0) {
+  function proceedToPlacement() {
+    if (!draft) return;
+    if (sideBudget.remaining < 0) {
       setError("Budget exceeded. Reduce selected pieces.");
       return;
     }
-    const setup = buildBudgetSetup(bundle.setup, bundle.board, buyCounts);
-    setActiveSetup(setup);
-    setState(createGameFromSetup(setup, bundle.board));
-    setBudgetPhase(false);
+    setDraft((prev) => (prev ? { ...prev, stage: "place" } : prev));
+    setPlacementSelectedPieceId(null);
+    setError("");
+  }
+
+  function backToBuy() {
+    setDraft((prev) => (prev ? { ...prev, stage: "buy" } : prev));
+    setPlacementSelectedPieceId(null);
+  }
+
+  function onSquareDrop(x: number, y: number, rawPayload: string) {
+    if (!draft || !bundle || draft.stage !== "place") return;
+    const payload = readDragPayload(rawPayload);
+    if (!payload) return;
+
+    const side = draft.activeSide;
+    if (payload.side !== side) return;
+    if (!isPlacementRow(side, y, bundle.board.height)) return;
+
+    const occupant = draftAllPiecesOnBoard.find((p) => p.x === x && p.y === y);
+    if (payload.kind === "pool") {
+      if (occupant) return;
+      const remain = remainingToPlace(side, payload.typeId);
+      if (remain <= 0) return;
+      const index = placedCount(side, payload.typeId) + 1;
+      const instanceId = `${side}_${payload.typeId}_${index}`;
+      const newPiece: PieceInstance = {
+        instanceId,
+        typeId: payload.typeId,
+        side,
+        x,
+        y,
+        state: {},
+      };
+      setDraft((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          placements: {
+            ...prev.placements,
+            [side]: [...prev.placements[side], newPiece],
+          },
+        };
+      });
+      return;
+    }
+
+    if (payload.kind === "placed") {
+      const current = draft.placements[side].find((p) => p.instanceId === payload.instanceId);
+      if (!current) return;
+      if (occupant && occupant.instanceId !== current.instanceId) return;
+      setDraft((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          placements: {
+            ...prev.placements,
+            [side]: prev.placements[side].map((p) =>
+              p.instanceId === payload.instanceId ? { ...p, x, y } : p
+            ),
+          },
+        };
+      });
+      setPlacementSelectedPieceId(null);
+    }
+  }
+
+  function onPlacementPieceClick(piece: PieceInstance) {
+    if (!draft || draft.stage !== "place") return;
+    if (piece.side !== draft.activeSide) return;
+
+    if (placementSelectedPieceId === piece.instanceId) {
+      setDraft((prev) => {
+        if (!prev) return prev;
+        const side = prev.activeSide;
+        return {
+          ...prev,
+          placements: {
+            ...prev.placements,
+            [side]: prev.placements[side].filter((p) => p.instanceId !== piece.instanceId),
+          },
+        };
+      });
+      setPlacementSelectedPieceId(null);
+      return;
+    }
+
+    setPlacementSelectedPieceId(piece.instanceId);
+    setError("");
+  }
+
+  function onPlacementSquareClick(x: number, y: number) {
+    if (!draft || !bundle || draft.stage !== "place") return;
+    if (!placementSelectedPieceId) return;
+
+    const side = draft.activeSide;
+    if (!isPlacementRow(side, y, bundle.board.height)) return;
+
+    const occupant = draftAllPiecesOnBoard.find((p) => p.x === x && p.y === y);
+    if (occupant && occupant.instanceId !== placementSelectedPieceId) return;
+
+    setDraft((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        placements: {
+          ...prev.placements,
+          [side]: prev.placements[side].map((p) =>
+            p.instanceId === placementSelectedPieceId ? { ...p, x, y } : p
+          ),
+        },
+      };
+    });
+    setPlacementSelectedPieceId(null);
+    setError("");
+  }
+
+  function confirmPlacementAndAdvance() {
+    if (!draft || !bundle) return;
+    const side = draft.activeSide;
+
+    for (const piece of bundle.setup.pieceTypes) {
+      const need = requiredCount(side, piece.id);
+      const have = placedCount(side, piece.id);
+      if (have !== need) {
+        setError(`Place all selected ${piece.name} pieces for ${side}.`);
+        return;
+      }
+    }
+
+    if (side === "white") {
+      setDraft((prev) =>
+        prev
+          ? {
+              ...prev,
+              activeSide: "black",
+              stage: "buy",
+            }
+          : prev
+      );
+      setPlacementSelectedPieceId(null);
+      setError("");
+      return;
+    }
+
+    const finalPieces = [...draft.placements.white, ...draft.placements.black];
+    const runtimeSetup: GameSetup = {
+      ...bundle.setup,
+      id: `${bundle.setup.id}_epistemate_runtime`,
+      name: `${bundle.setup.name} (Drafted)` ,
+      placedPieces: finalPieces,
+    };
+    setActiveSetup(runtimeSetup);
+    setState(createGameFromSetup(runtimeSetup, bundle.board));
+    setDraft(null);
+    setPlacementSelectedPieceId(null);
     setError("");
   }
 
@@ -250,9 +468,7 @@ export function HotSeatPage() {
       return;
     }
 
-    if (hit.side !== turnSide) {
-      return;
-    }
+    if (hit.side !== turnSide) return;
     setSelectedPieceId(hit.instanceId);
     setLegalMoves(generatePseudoLegalMoves(state, hit.instanceId));
   }
@@ -271,62 +487,150 @@ export function HotSeatPage() {
         <Link to="/">Back to menu</Link>
       </div>
 
-      <div className="card" style={{ marginBottom: 12 }}>
-        <div className="row">
-          <label>
-            Setup
-            <select value={selectedSetupId} onChange={(e) => setSelectedSetupId(e.target.value)}>
-              <option value="">Select setup</option>
-              {setups.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button onClick={() => void loadSetup()}>Load Setup</button>
-          <button onClick={restart} disabled={!state}>
-            Restart
-          </button>
-          <button onClick={() => setSoundEnabled((v) => !v)}>
-            Sound: {soundEnabled ? "On" : "Off"}
-          </button>
+      {!playMode ? (
+        <div className="card" style={{ marginBottom: 12 }}>
+          <h3>Choose Mode</h3>
+          <div className="row">
+            <button onClick={() => void chooseMode("chess")}>Chess</button>
+            <button onClick={() => void chooseMode("epistemate")}>Epistemate</button>
+            <button onClick={() => void chooseMode("custom")}>Custom</button>
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="card" style={{ marginBottom: 12 }}>
+          <div className="row" style={{ justifyContent: "space-between" }}>
+            <strong>Mode: {playMode === "epistemate" ? "Epistemate" : playMode === "chess" ? "Chess" : "Custom"}</strong>
+            <div className="row">
+              <button onClick={resetToModePicker}>Change mode</button>
+              <button onClick={() => setSoundEnabled((v) => !v)}>Sound: {soundEnabled ? "On" : "Off"}</button>
+            </div>
+          </div>
+
+          {playMode === "custom" ? (
+            <div className="row" style={{ marginTop: 8 }}>
+              <label>
+                Setup
+                <select value={selectedSetupId} onChange={(e) => setSelectedSetupId(e.target.value)}>
+                  <option value="">Select setup</option>
+                  {setups.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+              </label>
+              <button onClick={() => void loadCustomSetup()}>Load Custom Setup</button>
+              <button onClick={restart} disabled={!state}>Restart</button>
+            </div>
+          ) : (
+            <div className="row" style={{ marginTop: 8 }}>
+              <button onClick={restart} disabled={!state}>Restart</button>
+            </div>
+          )}
+        </div>
+      )}
 
       {error ? <p style={{ color: "#b00020" }}>{error}</p> : null}
 
-      {budgetPhase && bundle ? (
+      {isDrafting && bundle && draft ? (
         <div className="card" style={{ marginBottom: 12 }}>
-          <h3>Budget Buy Phase</h3>
-          <p>
-            Starting budget per side: <strong>{currentBudget.max}</strong>
-          </p>
-          <p>
-            White remaining: <strong>{currentBudget.white}</strong> | Black remaining: <strong>{currentBudget.black}</strong>
-          </p>
-          {bundle.setup.pieceTypes.map((piece) => {
-            const count = buyCounts[piece.id] ?? { white: 0, black: 0 };
-            const price = piecePrice(piece);
-            return (
-              <div key={piece.id} className="row" style={{ marginBottom: 6, justifyContent: "space-between" }}>
-                <span>
-                  {piece.name} (<code>{piece.id}</code>) - cost {price}
-                </span>
-                <div className="row">
-                  <span>W:</span>
-                  <button onClick={() => adjustBuy(piece.id, "white", -1)}>-</button>
-                  <span>{count.white}</span>
-                  <button onClick={() => adjustBuy(piece.id, "white", 1)}>+</button>
-                  <span>B:</span>
-                  <button onClick={() => adjustBuy(piece.id, "black", -1)}>-</button>
-                  <span>{count.black}</span>
-                  <button onClick={() => adjustBuy(piece.id, "black", 1)}>+</button>
+          <h3>Epistemate Draft: {draft.activeSide.toUpperCase()} - {draft.stage === "buy" ? "Buy" : "Place"}</h3>
+          <p>Budget: <strong>{sideBudget.remaining}</strong> / {sideBudget.max} remaining for {draft.activeSide}.</p>
+          <p>Placement rule: only your first two rows are allowed.</p>
+
+          {draft.stage === "buy" ? (
+            <>
+              {bundle.setup.pieceTypes.map((piece) => {
+                const isKing = piece.tags?.includes("king");
+                const price = isKing ? 0 : piecePrice(piece);
+                const count = draft.buyCounts[piece.id]?.[draft.activeSide] ?? 0;
+                return (
+                  <div key={piece.id} className="row" style={{ marginBottom: 6, justifyContent: "space-between" }}>
+                    <span>{piece.name} (<code>{piece.id}</code>) - cost {price}{isKing ? " (auto included)" : ""}</span>
+                    <div className="row">
+                      <button disabled={isKing} onClick={() => adjustBuy(draft.activeSide, piece.id, -1)}>-</button>
+                      <span>{count}</span>
+                      <button disabled={isKing} onClick={() => adjustBuy(draft.activeSide, piece.id, 1)}>+</button>
+                    </div>
+                  </div>
+                );
+              })}
+              <button onClick={proceedToPlacement}>Proceed to Placement</button>
+            </>
+          ) : (
+            <>
+              <div className="row" style={{ alignItems: "flex-start" }}>
+                <div style={{ minWidth: 320 }}>
+                  <h4>Pieces to place</h4>
+                  {bundle.setup.pieceTypes.map((piece) => {
+                    const remaining = remainingToPlace(draft.activeSide, piece.id);
+                    if (remaining <= 0) return null;
+                    return (
+                      <div key={piece.id} className="card" style={{ marginBottom: 6, padding: 8 }} draggable onDragStart={(e) => {
+                        const payload: DragPayload = { kind: "pool", typeId: piece.id, side: draft.activeSide };
+                        e.dataTransfer.setData("text/plain", JSON.stringify(payload));
+                      }}>
+                        <div className="row" style={{ justifyContent: "space-between" }}>
+                          <span>{piece.name} x{remaining}</span>
+                          <img className="piece-img" src={typeAssetForSide(piece, draft.activeSide)} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div
+                  className="board"
+                  style={{
+                    gridTemplateColumns: `repeat(${bundle.board.width}, 56px)`,
+                    width: bundle.board.width * 56,
+                  }}
+                >
+                  {Array.from({ length: bundle.board.height }).flatMap((_, rowIndex) => {
+                    const y = rowIndex;
+                    return Array.from({ length: bundle.board.width }).map((__, x) => {
+                      const piece = draftVisiblePiecesOnBoard.find((p) => p.x === x && p.y === y);
+                      return (
+                        <button
+                          key={`draft-${x},${y}`}
+                          type="button"
+                          className={`square ${squareColor(x, y)} ${isPlacementRow(draft.activeSide, y, bundle.board.height) ? "" : ""}`}
+                          onClick={() => onPlacementSquareClick(x, y)}
+                          onDragOver={(e) => e.preventDefault()}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            onSquareDrop(x, y, e.dataTransfer.getData("text/plain"));
+                          }}
+                        >
+                          {piece ? (
+                            <img
+                              className="piece-img"
+                              style={{ outline: placementSelectedPieceId === piece.instanceId ? "2px solid #2f6fed" : undefined }}
+                              src={pieceAssetForSide(bundle.setup, piece)}
+                              draggable={piece.side === draft.activeSide}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onPlacementPieceClick(piece);
+                              }}
+                              onDragStart={(e) => {
+                                if (piece.side !== draft.activeSide) return;
+                                const payload: DragPayload = { kind: "placed", instanceId: piece.instanceId, side: draft.activeSide };
+                                e.dataTransfer.setData("text/plain", JSON.stringify(payload));
+                              }}
+                            />
+                          ) : null}
+                        </button>
+                      );
+                    });
+                  })}
                 </div>
               </div>
-            );
-          })}
-          <button onClick={startBudgetGame}>Start Match</button>
+
+              <div className="row" style={{ marginTop: 8 }}>
+                <button onClick={backToBuy}>Back to Buy</button>
+                <button onClick={confirmPlacementAndAdvance}>
+                  {draft.activeSide === "white" ? "Confirm White Placement" : "Confirm Black Placement & Start"}
+                </button>
+              </div>
+            </>
+          )}
         </div>
       ) : null}
 
@@ -338,13 +642,7 @@ export function HotSeatPage() {
 
       {state && bundle && activeSetup ? (
         <div className="row" style={{ alignItems: "flex-start" }}>
-          <div
-            className="board"
-            style={{
-              gridTemplateColumns: `repeat(${bundle.board.width}, 56px)`,
-              width: bundle.board.width * 56,
-            }}
-          >
+          <div className="board" style={{ gridTemplateColumns: `repeat(${bundle.board.width}, 56px)`, width: bundle.board.width * 56 }}>
             {Array.from({ length: bundle.board.height }).flatMap((_, rowIndex) => {
               const y = rowIndex;
               return Array.from({ length: bundle.board.width }).map((__, x) => {
@@ -359,9 +657,7 @@ export function HotSeatPage() {
                     onClick={() => onSquareClick(x, y)}
                     title={`${x},${y}`}
                   >
-                    {piece ? (
-                      <img className="piece-img" src={pieceAssetForSide(activeSetup, piece)} />
-                    ) : null}
+                    {piece ? <img className="piece-img" src={pieceAssetForSide(activeSetup, piece)} /> : null}
                   </button>
                 );
               });
@@ -371,21 +667,13 @@ export function HotSeatPage() {
           <div style={{ minWidth: 320 }}>
             <div className="card">
               <h3>Turn</h3>
-              <p>
-                Side to move: <strong>{state.sides[state.currentTurnIndex]}</strong>
-              </p>
-              {state.status === "finished" ? (
-                <p>
-                  Winner: <strong>{state.winnerSide}</strong>
-                </p>
-              ) : null}
+              <p>Side to move: <strong>{state.sides[state.currentTurnIndex]}</strong></p>
+              {state.status === "finished" ? <p>Winner: <strong>{state.winnerSide}</strong></p> : null}
             </div>
             <div className="card" style={{ marginTop: 12 }}>
               <h3>Selection</h3>
               {selectedPiece ? (
-                <p>
-                  {selectedPiece.instanceId} ({selectedPiece.typeId}) at ({selectedPiece.x},{selectedPiece.y})
-                </p>
+                <p>{selectedPiece.instanceId} ({selectedPiece.typeId}) at ({selectedPiece.x},{selectedPiece.y})</p>
               ) : (
                 <p>No selection</p>
               )}
@@ -398,9 +686,7 @@ export function HotSeatPage() {
               ) : (
                 <ul>
                   {state.capturedPieces.map((p) => (
-                    <li key={p.instanceId}>
-                      {p.instanceId} ({p.side})
-                    </li>
+                    <li key={p.instanceId}>{p.instanceId} ({p.side})</li>
                   ))}
                 </ul>
               )}
@@ -415,9 +701,9 @@ export function HotSeatPage() {
             </div>
           </div>
         </div>
-      ) : (
-        <p>Load a setup to start playing.</p>
-      )}
+      ) : playMode && !isDrafting ? (
+        <p>{playMode === "custom" ? "Load a custom setup to start playing." : "Loading selected mode..."}</p>
+      ) : null}
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { MenuPage } from "./pages/MenuPage";
 import { HotSeatPage } from "./pages/HotSeatPage";
 import { CreatePage } from "./pages/CreatePage";
 import { PlaceholderPage } from "./pages/PlaceholderPage";
+import { VsPlayerPage } from "./pages/VsPlayerPage";
 import { RulebookPage } from "./pages/RulebookPage";
 import { useAuth } from "./state/auth";
 
@@ -51,7 +52,11 @@ export function App() {
       />
       <Route
         path="/play/vs-player"
-        element={<PlaceholderPage title="Vs Player" message="Coming next (online/multiplayer)." />}
+        element={
+          <Protected>
+            <VsPlayerPage />
+          </Protected>
+        }
       />
       <Route
         path="/play/vs-npc"
