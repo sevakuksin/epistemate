@@ -1,6 +1,7 @@
 import type { PieceInstance, PieceTypeDefinition } from "@cv/shared";
 import type { CompactMove, GameState } from "./types.js";
 import { normalizeDirection } from "./gcd.js";
+import { asNumber, directionClass, isUntargetablePiece } from "./customRules.js";
 
 export type HookContext = {
   state: GameState;
@@ -24,8 +25,8 @@ function resolveVectorForSide(piece: PieceInstance, dx: number, dy: number, rela
 function pieceAttacksSquare(state: GameState, piece: PieceInstance, targetX: number, targetY: number): boolean {
   const typeDef = state.pieceTypes.get(piece.typeId);
   if (!typeDef) return false;
+  if (isUntargetablePiece(state, piece) && typeDef.pieceHooks?.includes("nietzscheStatic")) return false;
 
-  // For attack logic, prefer explicit capture rules; fallback to movement rules.
   const patterns = typeDef.captureRules.length > 0 ? typeDef.captureRules : typeDef.movementRules;
   for (const pattern of patterns) {
     if (pattern.moveOnly) continue;
@@ -83,8 +84,6 @@ function pieceAttacksSquare(state: GameState, piece: PieceInstance, targetX: num
           }
 
           if (x === targetX && y === targetY) return true;
-
-          // For step patterns, collision blocks further progression.
           if (pattern.kind === "step" && state.occupancy.has(`${x},${y}`)) break;
         }
       }
@@ -101,15 +100,31 @@ function isSquareAttackedByOpponent(state: GameState, side: string, x: number, y
   return false;
 }
 
+function stageAllowsMove(piece: PieceInstance, move: CompactMove, stageName: string): boolean {
+  const dx = move.to.x - move.from.x;
+  const dy = move.to.y - move.from.y;
+  const adx = Math.abs(dx);
+  const ady = Math.abs(dy);
+  const forward = piece.side === "black" ? 1 : -1;
+
+  if (stageName === "pawn") {
+    if (move.captureId) return adx === 1 && dy === forward;
+    if (dx !== 0) return false;
+    if (dy === forward) return true;
+    if (dy === 2 * forward) return !Boolean(piece.state.hasMoved);
+    return false;
+  }
+  if (stageName === "knight") return (adx === 1 && ady === 2) || (adx === 2 && ady === 1);
+  if (stageName === "bishop") return adx === ady && adx > 0;
+  if (stageName === "rook") return (dx === 0) !== (dy === 0);
+  if (stageName === "queen") return stageAllowsMove(piece, move, "rook") || stageAllowsMove(piece, move, "bishop");
+  return true;
+}
+
 export const pieceHookRegistry: Record<string, PieceHookFn> = {
   noRepeatDirection: (ctx) => {
-    const raw = ctx.piece.state.lastMoveDirection as
-      | { dx: number; dy: number }
-      | undefined
-      | null;
-    if (raw == null || typeof raw.dx !== "number" || typeof raw.dy !== "number") {
-      return ctx.moves;
-    }
+    const raw = ctx.piece.state.lastMoveDirection as { dx: number; dy: number } | undefined | null;
+    if (raw == null || typeof raw.dx !== "number" || typeof raw.dy !== "number") return ctx.moves;
     return ctx.moves.filter((m) => {
       const ddx = m.to.x - m.from.x;
       const ddy = m.to.y - m.from.y;
@@ -118,6 +133,32 @@ export const pieceHookRegistry: Record<string, PieceHookFn> = {
       return !(norm.dx === raw.dx && norm.dy === raw.dy);
     });
   },
+  hegelDialectic: (ctx) => {
+    const last = ctx.piece.state.lastDirectionClass;
+    if (typeof last !== "string") return ctx.moves;
+    return ctx.moves.filter((m) => directionClass(m.to.x - m.from.x, m.to.y - m.from.y) !== last);
+  },
+  nietzscheStatic: () => [],
+  vygotskyEvolution: (ctx) => {
+    const seq =
+      ctx.typeDef.behavior?.stageSequence && ctx.typeDef.behavior.stageSequence.length > 0
+        ? ctx.typeDef.behavior.stageSequence
+        : ["pawn", "knight", "bishop", "rook", "queen"];
+    const stageIndex = Math.max(0, Math.min(seq.length - 1, Math.floor(asNumber(ctx.piece.state.stageIndex, 0))));
+    return ctx.moves.filter((m) => stageAllowsMove(ctx.piece, m, seq[stageIndex]));
+  },
+  skinnerReinforce: (ctx) => {
+    const mustRepeat = Boolean(ctx.piece.state.mustRepeatAfterReward);
+    if (!mustRepeat) return ctx.moves;
+    const vec = ctx.piece.state.lastMoveVector as { dx: number; dy: number } | undefined;
+    if (!vec || typeof vec.dx !== "number" || typeof vec.dy !== "number") return ctx.moves;
+    const forced = ctx.moves.filter((m) => m.to.x - m.from.x === vec.dx && m.to.y - m.from.y === vec.dy);
+    return forced.length > 0 ? forced : ctx.moves;
+  },
+  attentionSpanLocal: (ctx) => {
+    const radius = Math.max(1, Math.floor(asNumber(ctx.typeDef.behavior?.attentionRadius, 1)));
+    return ctx.moves.filter((m) => Math.max(Math.abs(m.to.x - m.from.x), Math.abs(m.to.y - m.from.y)) <= radius);
+  },
   castleLike: (ctx) => {
     const piece = ctx.piece;
     const state = ctx.state;
@@ -125,7 +166,6 @@ export const pieceHookRegistry: Record<string, PieceHookFn> = {
 
     const out = [...ctx.moves];
     const rookType = "rook";
-
     const candidates = [
       { rookX: 0, kingToX: piece.x - 2, rookToX: piece.x - 1 },
       { rookX: state.board.width - 1, kingToX: piece.x + 2, rookToX: piece.x + 1 },
@@ -138,10 +178,7 @@ export const pieceHookRegistry: Record<string, PieceHookFn> = {
       const rookId = state.occupancy.get(`${c.rookX},${piece.y}`);
       if (!rookId) continue;
       const rook = state.pieces.get(rookId);
-      if (!rook) continue;
-      if (rook.side !== piece.side) continue;
-      if (rook.typeId !== rookType) continue;
-      if (rook.state.hasMoved) continue;
+      if (!rook || rook.side !== piece.side || rook.typeId !== rookType || rook.state.hasMoved) continue;
 
       const minX = Math.min(piece.x, c.rookX);
       const maxX = Math.max(piece.x, c.rookX);
@@ -157,10 +194,6 @@ export const pieceHookRegistry: Record<string, PieceHookFn> = {
       if (state.occupancy.has(`${c.kingToX},${piece.y}`)) continue;
       if (state.occupancy.has(`${c.rookToX},${piece.y}`)) continue;
 
-      // Castling legality (without checkmate engine):
-      // - king may not castle out of check
-      // - king may not pass through attacked square
-      // - king may not end on attacked square
       const stepDir = c.kingToX > piece.x ? 1 : -1;
       const throughX = piece.x + stepDir;
       const fromAttacked = isSquareAttackedByOpponent(state, piece.side, piece.x, piece.y);

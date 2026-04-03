@@ -47,6 +47,20 @@ export const PieceTypeDefinitionSchema = z.object({
   defaultState: z.record(z.unknown()).optional(),
   /** Piece-level hooks applied after pattern generation (e.g. noRepeatDirection) */
   pieceHooks: z.array(z.string()).optional(),
+  /** Relative in-game purchase cost for budget mode. */
+  price: z.number().nonnegative().default(1),
+  /** Optional UI-only representation (e.g. placebo displays as queen). */
+  displayRepresentation: z.string().optional(),
+  /** Behavior config for custom pieces. */
+  behavior: z
+    .object({
+      slipProbability: z.number().min(0).max(1).optional(),
+      attentionRadius: z.number().int().positive().optional(),
+      attentionIdleLimit: z.number().int().positive().optional(),
+      skinnerForceRepeat: z.boolean().optional(),
+      stageSequence: z.array(z.string()).optional(),
+    })
+    .optional(),
 });
 
 export type PieceTypeDefinition = z.infer<typeof PieceTypeDefinitionSchema>;
@@ -91,6 +105,12 @@ export const GameSetupSchema = z.object({
   pieceTypes: z.array(PieceTypeDefinitionSchema).min(1),
   rulesetId: z.string().optional(),
   winCondition: WinConditionSchema.default({ type: "captureTag", tag: "king" }),
+  budgetMode: z
+    .object({
+      enabled: z.boolean().default(false),
+      startingBudget: z.number().int().nonnegative().default(40),
+    })
+    .optional(),
 });
 
 export type GameSetup = z.infer<typeof GameSetupSchema>;

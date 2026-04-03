@@ -28,6 +28,7 @@ export type GameState = {
   board: BoardDefinition;
   sides: Side[];
   currentTurnIndex: number;
+  turnNumber: number;
   pieceTypes: Map<string, PieceTypeDefinition>;
   pieces: Map<string, PieceInstance>;
   occupancy: Map<string, string>;

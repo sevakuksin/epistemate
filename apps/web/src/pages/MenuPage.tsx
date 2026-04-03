@@ -53,6 +53,7 @@ export function MenuPage() {
         />
         <MenuCard title="Vs NPC" path="/play/vs-npc" description="Play against AI (placeholder)." comingSoon />
         <MenuCard title="Create" path="/create" description="Define piece types, boards, and setups." />
+        <MenuCard title="Rulebook" path="/rulebook" description="Piece rules, prices, and budget mode." />
       </div>
     </div>
   );

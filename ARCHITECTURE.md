@@ -1,168 +1,131 @@
 # Architecture
 
-## 1) What Was Built
+## 1) What Is Implemented
 
-This pilot implements a local custom chess-variant platform with:
+This pilot now includes:
 
-- Login/identity stub (`username` only, local API persistence)
-- Main menu:
-  - `Hot Seat` (working)
-  - `Vs Player` (placeholder)
-  - `Vs NPC` (placeholder)
-  - `Create` (working basic creator/editor)
-- Hot Seat gameplay:
-  - Arbitrary board size rendering
-  - Piece selection and legal move highlighting
-  - Move execution and turn switching
-  - Capture handling
-  - Capture-the-king game end condition
-  - Move history and captured list
-- Create mode:
-  - Piece type editor (movement/capture patterns, hooks, tags, asset refs)
-  - Board editor (id/name/width/height)
-  - Setup editor (sides, placements, piece embedding)
-- Seeded sample preset with:
-  - King (step all 8 directions)
-  - Rook-like slider
-  - Wiggler piece using custom hook `noRepeatDirection`
+- Local auth stub (username)
+- Main menu + routed pages
+- Hot Seat local play
+- Pre-game budget buy phase
+- Rulebook page
+- Create endpoints (`/create/piece`, `/create/board`)
+- Piece/board/setup persistence in SQLite docs store
+- Sound effects hooks in gameplay UI
 
-## 2) Architecture
+## 2) High-Level Flow
 
 ```mermaid
 flowchart LR
-  subgraph web [apps/web]
-    ui[React UI]
-    apiClient[API Client]
-    engine[packages/engine]
-    ui --> apiClient
-    ui --> engine
-  end
-
-  subgraph server [apps/server]
-    routes[Express Routes]
-    sqlite[(SQLite)]
-    routes --> sqlite
-  end
-
-  apiClient --> routes
+  CreateUI[Create UI] --> ServerDocs[(SQLite docs)]
+  HotSeatLoad[Load setup bundle] --> BudgetPhase[Budget buy phase]
+  BudgetPhase --> RuntimeSetup[Runtime setup assembly]
+  RuntimeSetup --> Engine[Move generator + hooks + apply effects]
+  Engine --> HotSeatUI[Board, history, winner banner]
+  Rulebook[Rulebook page] --> UserHelp[Rules + prices]
 ```
 
-- Frontend: Vite + React + TypeScript + React Router
-- Backend: Express + better-sqlite3
-- Shared schemas/types: `packages/shared`
-- Game logic: `packages/engine` (pure, no UI assumptions)
+## 3) Data Model Extensions
 
-## 3) Data Model
+### `PieceTypeDefinition`
 
-### Piece Type (`PieceTypeDefinition`)
+Extended with:
 
-- `id`, `name`, `asset`
-- `movementRules[]`, `captureRules[]`
-- `constraints` (metadata bag)
-- `stateSchema` (optional field hints)
-- `defaultState` (initial piece state)
-- `tags[]`
-- `pieceHooks[]` (extension hooks like `noRepeatDirection`)
+- `price: number` (default 1)
+- `displayRepresentation?: string`
+- `behavior?: { ... }`:
+  - `slipProbability`
+  - `attentionRadius`
+  - `attentionIdleLimit`
+  - `skinnerForceRepeat`
+  - `stageSequence`
 
-### Piece Instance (`PieceInstance`)
+### `GameSetup`
 
-- `instanceId`, `typeId`, `side`
-- `x`, `y`
-- `state` (e.g. `hasMoved`, `lastMoveDirection`, `moveCount`, custom metadata)
+Extended with:
 
-### Board Definition (`BoardDefinition`)
+- `budgetMode?: { enabled: boolean; startingBudget: number }`
 
-- `id`, `name`
-- `width`, `height`
-- `squareMeta` (optional styling metadata)
+### Runtime `GameState`
 
-### Game Setup (`GameSetup`)
+Extended with:
 
-- `id`, `name`, `boardId`
-- `placedPieces[]`
-- `sides[]`
-- `pieceTypes[]` embedded for portability
-- `winCondition` (`captureTag: king` in this pilot)
+- `turnNumber`
 
-### Game State (`GameState` in engine runtime)
+## 4) Engine Rule Architecture
 
-- `currentTurnIndex`
-- `pieces` map and `occupancy` map
-- `moveHistory[]`
-- `capturedPieces[]`
-- `status` (`ongoing`/`finished`)
-- `winnerSide`
+### Declarative Layer
 
-## 4) Rules Engine Design
+Patterns still drive baseline movement:
 
-### Declarative Rule Layer
+- `kind`: `step | slide | jump`
+- vectors, range, blockers
+- capture/move-only constraints
+- first-move restrictions
+- side-relative vectors
 
-Movement/capture patterns support:
+### Hook Layer
 
-- `kind`: `step` | `slide` | `jump`
-- `vectors[]` (dx, dy)
-- optional `range`
-- blocker behavior
-- `moveOnly` / `captureOnly`
-- first-move and unmoved restrictions
+Piece hooks post-process generated pseudo-legal moves.
 
-### Custom Hook Layer
+Implemented hooks:
 
-- Piece-level hook registry in engine (`pieceHookRegistry`)
-- Hooks can filter or augment generated moves
-- Implemented example:
-  - `noRepeatDirection`: prevents a piece from moving in the same normalized direction as its previous move
+- `castleLike`
+- `noRepeatDirection`
+- `hegelDialectic`
+- `nietzscheStatic`
+- `vygotskyEvolution`
+- `skinnerReinforce`
+- `attentionSpanLocal`
+- `freudSlip` (apply-time reroute)
 
-### Core Engine API
+### Apply-Time Effects in `applyMove`
 
-- `generatePseudoLegalMoves(state, pieceId)`
-- `validateMove(state, move)`
-- `applyMove(state, move)`
-- `evaluateWinCondition(state, lastCapture, moverSide)`
-- `serializeGame(state)`
-- `deserializeGame(data)`
+- Optional Freud slip reroute before final move application
+- Hegel direction class memory update
+- Skinner reward-repeat state update
+- Vygotsky stage progression after captures
+- Attention Span idle-turn increment and despawn
+- Companion move support (castling)
 
-### Internal Representation
+## 5) Piece Behavior Summary
 
-- Coordinate-indexed occupancy map for O(1) square lookup
-- Piece-id-indexed map for O(1) piece access
-- Compact move objects (`from`, `to`, `captureId?`)
+- **Hegel**: queen-like movement, cannot repeat same direction class back-to-back
+- **Nietzsche**: cannot move and cannot be captured
+- **Vygotsky**: starts pawn-like, upgrades through configured stage sequence on captures
+- **Skinner**: after a capture, must repeat previous vector next move if legal
+- **Freud**: configured chance that intended move is replaced by random legal move
+- **Attention Span**: local radius movement, removed after too many idle owner turns
+- **Placebo**: bishop-like real rules with optional stronger visual representation
+- **Causal Loop**: intentionally left as future extension point
 
-## 5) Local Persistence
+## 6) Budget Mode Runtime
 
-SQLite tables:
+1. Load selected setup + board.
+2. If `budgetMode.enabled`, show buy UI for both sides.
+3. Enforce per-side budget by piece `price`.
+4. Build runtime setup from purchased quantities.
+5. Auto-place kings and fill remaining purchased pieces on each side's home half.
+6. Start normal Hot Seat play.
 
-- `users`
-- `docs` (generic JSON document store for `piece_type`, `board`, `setup`)
+## 7) Seeded Defaults
 
-This keeps v1 simple while preserving a migration path to richer schemas later.
+Server seed includes normal + custom catalog with relative prices and behavior metadata. Existing docs are upserted by id, so updates remain idempotent.
 
-## 6) How To Run
+## 8) Testing
+
+Engine tests cover:
+
+- Existing functionality (serialization, castling, capture win)
+- All implemented new custom piece behaviors
+
+## 9) Run / Build
 
 ```bash
 cd ~/chess
-rm -rf node_modules package-lock.json packages/*/node_modules apps/*/node_modules
 npm install
 npm run bootstrap
+npm run test
+npm run build
 npm run dev
 ```
-
-- Web: `http://localhost:5173`
-- API health: `http://localhost:3001/api/health`
-
-## 7) API Surface (v1)
-
-- `POST /api/session`
-- `GET/PUT/POST/DELETE /api/piece-types`
-- `GET/PUT/POST/DELETE /api/boards`
-- `GET/PUT/POST/DELETE /api/setups`
-- `GET /api/setup-bundle/:id`
-
-## 8) Next Steps
-
-- Online multiplayer
-- NPC / AI player
-- Invitation/session flow
-- Rich form-based rule builder (less raw JSON)
-- Setup import/export presets
-- Better asset tooling/upload pipeline

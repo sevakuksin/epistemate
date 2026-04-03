@@ -2,6 +2,7 @@ import type { Pattern, PieceInstance } from "@cv/shared";
 import type { CompactMove, GameState } from "./types.js";
 import { coordKey } from "./types.js";
 import { applyPieceHooks } from "./hooks.js";
+import { isUntargetablePiece } from "./customRules.js";
 
 function inBounds(x: number, y: number, w: number, h: number): boolean {
   return x >= 0 && x < w && y >= 0 && y < h;
@@ -60,6 +61,7 @@ function expandPattern(
         }
         const occ = state.pieces.get(occId);
         if (occ && occ.side !== piece.side) {
+          if (isUntargetablePiece(state, occ)) break;
           if (!wantEmpty) {
             out.push({
               pieceId: piece.instanceId,
@@ -101,6 +103,7 @@ function expandPattern(
         } else {
           const occ = state.pieces.get(occId);
           if (occ && occ.side !== piece.side && !wantEmpty) {
+            if (isUntargetablePiece(state, occ)) break;
             out.push({
               pieceId: piece.instanceId,
               from: { x, y },
@@ -142,6 +145,7 @@ function expandPattern(
         } else {
           const occ = state.pieces.get(occId);
           if (occ && occ.side !== piece.side && !wantEmpty) {
+            if (isUntargetablePiece(state, occ)) continue;
             out.push({
               pieceId: piece.instanceId,
               from: { x, y },

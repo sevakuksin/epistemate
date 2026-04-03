@@ -5,7 +5,7 @@ import Database from "better-sqlite3";
 const dbPath = process.env.DATABASE_PATH ?? path.resolve(process.cwd(), "data", "app.db");
 fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
-export const db = new Database(dbPath);
+export const db: any = new Database(dbPath);
 db.pragma("journal_mode = WAL");
 
 export type StoredDocKind = "piece_type" | "board" | "setup";

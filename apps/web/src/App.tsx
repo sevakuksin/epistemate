@@ -4,6 +4,7 @@ import { MenuPage } from "./pages/MenuPage";
 import { HotSeatPage } from "./pages/HotSeatPage";
 import { CreatePage } from "./pages/CreatePage";
 import { PlaceholderPage } from "./pages/PlaceholderPage";
+import { RulebookPage } from "./pages/RulebookPage";
 import { useAuth } from "./state/auth";
 
 function Protected({ children }: { children: React.ReactNode }) {
@@ -37,6 +38,14 @@ export function App() {
         element={
           <Protected>
             <CreatePage />
+          </Protected>
+        }
+      />
+      <Route
+        path="/rulebook"
+        element={
+          <Protected>
+            <RulebookPage />
           </Protected>
         }
       />
