@@ -63,7 +63,12 @@ function movesEqual(a: CompactMove, b: CompactMove): boolean {
     a.from.y === b.from.y &&
     a.to.x === b.to.x &&
     a.to.y === b.to.y &&
-    a.captureId === b.captureId
+    a.captureId === b.captureId &&
+    a.companionMove?.pieceId === b.companionMove?.pieceId &&
+    a.companionMove?.from.x === b.companionMove?.from.x &&
+    a.companionMove?.from.y === b.companionMove?.from.y &&
+    a.companionMove?.to.x === b.companionMove?.to.x &&
+    a.companionMove?.to.y === b.companionMove?.to.y
   );
 }
 
@@ -134,6 +139,21 @@ export function applyMove(state: GameState, move: CompactMove): GameState {
 
   pieces.set(moving.instanceId, moving);
   occupancy.set(coordKey(move.to), moving.instanceId);
+
+  if (move.companionMove) {
+    const buddy = pieces.get(move.companionMove.pieceId);
+    if (buddy) {
+      occupancy.delete(coordKey(move.companionMove.from));
+      const buddyMoved: PieceInstance = {
+        ...buddy,
+        x: move.companionMove.to.x,
+        y: move.companionMove.to.y,
+        state: { ...buddy.state, hasMoved: true },
+      };
+      pieces.set(buddyMoved.instanceId, buddyMoved);
+      occupancy.set(coordKey(move.companionMove.to), buddyMoved.instanceId);
+    }
+  }
 
   const capturedPieces = [...state.capturedPieces];
   if (captured) {

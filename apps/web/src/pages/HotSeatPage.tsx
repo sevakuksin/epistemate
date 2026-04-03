@@ -11,6 +11,15 @@ type Bundle = {
   setup: GameSetup;
 };
 
+function pieceAssetForSide(setup: GameSetup, piece: PieceInstance): string | undefined {
+  const typeDef = setup.pieceTypes.find((t) => t.id === piece.typeId);
+  if (!typeDef) return undefined;
+  if (piece.side === "white" || piece.side === "black") {
+    return typeDef.assetBySide?.[piece.side] ?? typeDef.asset;
+  }
+  return typeDef.asset;
+}
+
 function coordMatch(a: { x: number; y: number }, b: { x: number; y: number }): boolean {
   return a.x === b.x && a.y === b.y;
 }
@@ -20,7 +29,10 @@ function squareColor(x: number, y: number): "light" | "dark" {
 }
 
 function moveLabel(m: CompactMove): string {
-  return `${m.pieceId}: (${m.from.x},${m.from.y}) -> (${m.to.x},${m.to.y})${m.captureId ? ` x ${m.captureId}` : ""}`;
+  const castlePart = m.companionMove
+    ? ` + ${m.companionMove.pieceId}: (${m.companionMove.from.x},${m.companionMove.from.y}) -> (${m.companionMove.to.x},${m.companionMove.to.y})`
+    : "";
+  return `${m.pieceId}: (${m.from.x},${m.from.y}) -> (${m.to.x},${m.to.y})${m.captureId ? ` x ${m.captureId}` : ""}${castlePart}`;
 }
 
 export function HotSeatPage() {
@@ -153,7 +165,7 @@ export function HotSeatPage() {
                     title={`${x},${y}`}
                   >
                     {piece ? (
-                      <img className="piece-img" src={bundle.setup.pieceTypes.find((t) => t.id === piece.typeId)?.asset} />
+                      <img className="piece-img" src={pieceAssetForSide(bundle.setup, piece)} />
                     ) : null}
                   </button>
                 );

@@ -33,7 +33,7 @@ export function App() {
         }
       />
       <Route
-        path="/create"
+        path="/create/*"
         element={
           <Protected>
             <CreatePage />

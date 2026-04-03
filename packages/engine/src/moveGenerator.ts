@@ -35,9 +35,11 @@ function expandPattern(
   const { width, height } = state.board;
   const { x, y } = piece;
   const out: CompactMove[] = [];
+  const sideFactor = piece.side === "black" ? 1 : piece.side === "white" ? -1 : 1;
 
   for (const v of pattern.vectors) {
-    const { dx, dy } = v;
+    const dx = v.dx;
+    const dy = pattern.relativeToSide ? v.dy * sideFactor : v.dy;
     if (pattern.kind === "slide") {
       let i = 1;
       for (;;) {
@@ -159,7 +161,8 @@ function dedupeMoves(moves: CompactMove[]): CompactMove[] {
   const seen = new Set<string>();
   const out: CompactMove[] = [];
   for (const m of moves) {
-    const key = `${m.pieceId}|${m.to.x},${m.to.y}|${m.captureId ?? ""}`;
+    const c = m.companionMove;
+    const key = `${m.pieceId}|${m.to.x},${m.to.y}|${m.captureId ?? ""}|${c?.pieceId ?? ""}|${c?.to.x ?? ""},${c?.to.y ?? ""}`;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(m);

@@ -16,6 +16,12 @@ export type CompactMove = {
   to: Coord;
   /** Captured piece id if any */
   captureId?: string;
+  /** Optional compound movement, e.g. castling rook shift */
+  companionMove?: {
+    pieceId: string;
+    from: Coord;
+    to: Coord;
+  };
 };
 
 export type GameState = {

@@ -23,6 +23,8 @@ export const PatternSchema = z.object({
   moveOnly: z.boolean().optional(),
   captureOnly: z.boolean().optional(),
   hookId: z.string().optional(),
+  /** If true, dy is mirrored by side (white = forward up, black = forward down). */
+  relativeToSide: z.boolean().optional(),
 });
 
 export type Pattern = z.infer<typeof PatternSchema>;
@@ -31,6 +33,12 @@ export const PieceTypeDefinitionSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   asset: z.string(),
+  assetBySide: z
+    .object({
+      white: z.string().optional(),
+      black: z.string().optional(),
+    })
+    .optional(),
   movementRules: z.array(PatternSchema).default([]),
   captureRules: z.array(PatternSchema).default([]),
   constraints: z.record(z.unknown()).optional(),

@@ -4,6 +4,7 @@ type PieceTypeDefinition = {
   id: string;
   name: string;
   asset: string;
+  assetBySide?: { white?: string; black?: string };
   movementRules: unknown[];
   captureRules: unknown[];
   tags: string[];
@@ -48,6 +49,10 @@ export function ensureDemoPreset(): void {
     id: "king",
     name: "King",
     asset: "/assets/placeholders/king.svg",
+    assetBySide: {
+      white: "/assets/placeholders/king_white.svg",
+      black: "/assets/placeholders/king.svg",
+    },
     movementRules: [
       {
         kind: "step",
@@ -67,12 +72,17 @@ export function ensureDemoPreset(): void {
     ],
     captureRules: [],
     tags: ["king"],
+    pieceHooks: ["castleLike"],
   };
 
   const rook: PieceTypeDefinition = {
     id: "rook",
     name: "Rook",
     asset: "/assets/placeholders/rook.svg",
+    assetBySide: {
+      white: "/assets/placeholders/rook_white.svg",
+      black: "/assets/placeholders/rook.svg",
+    },
     movementRules: [
       {
         kind: "slide",
@@ -93,6 +103,10 @@ export function ensureDemoPreset(): void {
     id: "wiggler",
     name: "Wiggler",
     asset: "/assets/placeholders/wiggler.svg",
+    assetBySide: {
+      white: "/assets/placeholders/wiggler_white.svg",
+      black: "/assets/placeholders/wiggler.svg",
+    },
     movementRules: [
       {
         kind: "step",
@@ -154,6 +168,10 @@ export function ensureDemoPreset(): void {
     id: "queen",
     name: "Queen",
     asset: "/assets/placeholders/queen.svg",
+    assetBySide: {
+      white: "/assets/placeholders/queen_white.svg",
+      black: "/assets/placeholders/queen.svg",
+    },
     movementRules: [
       {
         kind: "slide",
@@ -178,6 +196,10 @@ export function ensureDemoPreset(): void {
     id: "bishop",
     name: "Bishop",
     asset: "/assets/placeholders/bishop.svg",
+    assetBySide: {
+      white: "/assets/placeholders/bishop_white.svg",
+      black: "/assets/placeholders/bishop.svg",
+    },
     movementRules: [
       {
         kind: "slide",
@@ -198,6 +220,10 @@ export function ensureDemoPreset(): void {
     id: "knight",
     name: "Knight",
     asset: "/assets/placeholders/knight.svg",
+    assetBySide: {
+      white: "/assets/placeholders/knight_white.svg",
+      black: "/assets/placeholders/knight.svg",
+    },
     movementRules: [
       {
         kind: "jump",
@@ -218,51 +244,21 @@ export function ensureDemoPreset(): void {
     tags: ["minor"],
   };
 
-  // Side-specific pawn types keep the engine generic while allowing directional behavior.
-  const pawnWhite: PieceTypeDefinition = {
-    id: "pawn_white",
-    name: "Pawn (White)",
+  const pawn: PieceTypeDefinition = {
+    id: "pawn",
+    name: "Pawn",
     asset: "/assets/placeholders/pawn.svg",
-    movementRules: [
-      {
-        kind: "step",
-        vectors: [{ dx: 0, dy: -1 }],
-        range: 1,
-        blockers: "all",
-      },
-      {
-        kind: "step",
-        vectors: [{ dx: 0, dy: -1 }],
-        range: 2,
-        blockers: "all",
-        firstMoveOnly: true,
-      },
-    ],
-    captureRules: [
-      {
-        kind: "step",
-        vectors: [
-          { dx: -1, dy: -1 },
-          { dx: 1, dy: -1 },
-        ],
-        range: 1,
-        blockers: "all",
-        captureOnly: true,
-      },
-    ],
-    tags: ["pawn"],
-  };
-
-  const pawnBlack: PieceTypeDefinition = {
-    id: "pawn_black",
-    name: "Pawn (Black)",
-    asset: "/assets/placeholders/pawn.svg",
+    assetBySide: {
+      white: "/assets/placeholders/pawn_white.svg",
+      black: "/assets/placeholders/pawn.svg",
+    },
     movementRules: [
       {
         kind: "step",
         vectors: [{ dx: 0, dy: 1 }],
         range: 1,
         blockers: "all",
+        relativeToSide: true,
       },
       {
         kind: "step",
@@ -270,6 +266,7 @@ export function ensureDemoPreset(): void {
         range: 2,
         blockers: "all",
         firstMoveOnly: true,
+        relativeToSide: true,
       },
     ],
     captureRules: [
@@ -282,6 +279,7 @@ export function ensureDemoPreset(): void {
         range: 1,
         blockers: "all",
         captureOnly: true,
+        relativeToSide: true,
       },
     ],
     tags: ["pawn"],
@@ -311,7 +309,7 @@ export function ensureDemoPreset(): void {
     // White pawns (y=6)
     ...Array.from({ length: 8 }).map((_, x) => ({
       instanceId: `w_p${x + 1}`,
-      typeId: "pawn_white",
+      typeId: "pawn",
       side: "white",
       x,
       y: 6,
@@ -329,7 +327,7 @@ export function ensureDemoPreset(): void {
     // Black pawns (y=1)
     ...Array.from({ length: 8 }).map((_, x) => ({
       instanceId: `b_p${x + 1}`,
-      typeId: "pawn_black",
+      typeId: "pawn",
       side: "black",
       x,
       y: 1,
@@ -342,7 +340,7 @@ export function ensureDemoPreset(): void {
     name: "Classic Chess Start (Capture-the-King)",
     boardId: classicBoard.id,
     sides: ["white", "black"],
-    pieceTypes: [king, queen, rook, bishop, knight, pawnWhite, pawnBlack],
+    pieceTypes: [king, queen, rook, bishop, knight, pawn],
     winCondition: { type: "captureTag", tag: "king" },
     placedPieces: classicPieces,
   };
@@ -350,8 +348,7 @@ export function ensureDemoPreset(): void {
   upsertDoc("piece_type", DEMO_USER_ID, queen.id, queen.name, queen);
   upsertDoc("piece_type", DEMO_USER_ID, bishop.id, bishop.name, bishop);
   upsertDoc("piece_type", DEMO_USER_ID, knight.id, knight.name, knight);
-  upsertDoc("piece_type", DEMO_USER_ID, pawnWhite.id, pawnWhite.name, pawnWhite);
-  upsertDoc("piece_type", DEMO_USER_ID, pawnBlack.id, pawnBlack.name, pawnBlack);
+  upsertDoc("piece_type", DEMO_USER_ID, pawn.id, pawn.name, pawn);
   upsertDoc("board", DEMO_USER_ID, classicBoard.id, classicBoard.name, classicBoard);
   upsertDoc("setup", DEMO_USER_ID, classicSetup.id, classicSetup.name, classicSetup);
 }
