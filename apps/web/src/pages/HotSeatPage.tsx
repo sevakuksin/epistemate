@@ -28,6 +28,7 @@ type DragPayload =
 
 const CLASSIC_SETUP_ID = "setup_classic_8x8";
 const EPISTEMATE_SETUP_ID = "setup_epistemate";
+const TURN_FLIP_DELAY_MS = 900;
 
 function pieceAssetForSide(setup: GameSetup, piece: PieceInstance): string | undefined {
   const typeDef = setup.pieceTypes.find((t) => t.id === piece.typeId);
@@ -69,6 +70,17 @@ function isPlacementRow(side: Side, y: number, boardHeight: number): boolean {
   return side === "white" ? y >= boardHeight - 2 : y <= 1;
 }
 
+function coordFromDisplay(
+  displayX: number,
+  displayY: number,
+  width: number,
+  height: number,
+  flipped: boolean
+): { x: number; y: number } {
+  if (!flipped) return { x: displayX, y: displayY };
+  return { x: width - 1 - displayX, y: height - 1 - displayY };
+}
+
 function readDragPayload(raw: string): DragPayload | null {
   try {
     const parsed = JSON.parse(raw) as DragPayload;
@@ -94,6 +106,8 @@ export function HotSeatPage() {
   const [playMode, setPlayMode] = useState<PlayMode | null>(null);
   const [draft, setDraft] = useState<DraftState | null>(null);
   const [placementSelectedPieceId, setPlacementSelectedPieceId] = useState<string | null>(null);
+  const [boardFlipped, setBoardFlipped] = useState(false);
+  const [deferTurnFlipUntil, setDeferTurnFlipUntil] = useState(0);
 
   const moveAudioRef = useRef<HTMLAudioElement | null>(null);
   const winAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -129,6 +143,30 @@ export function HotSeatPage() {
       })
       .catch(() => setError("Failed to load setups."));
   }, [user]);
+
+  const currentTurnSide = state ? state.sides[state.currentTurnIndex] : null;
+
+  useEffect(() => {
+    if (!draft || draft.stage !== "place") return;
+    setBoardFlipped(draft.activeSide === "black");
+  }, [draft?.activeSide, draft?.stage]);
+
+  useEffect(() => {
+    if (draft) return;
+    if (!currentTurnSide) return;
+
+    const desiredFlip = currentTurnSide === "black";
+    const waitMs = Math.max(0, deferTurnFlipUntil - Date.now());
+    if (waitMs === 0) {
+      setBoardFlipped(desiredFlip);
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setBoardFlipped(desiredFlip);
+    }, waitMs);
+    return () => window.clearTimeout(timer);
+  }, [draft, currentTurnSide, deferTurnFlipUntil]);
 
   const isDrafting = Boolean(draft && bundle);
 
@@ -195,6 +233,8 @@ export function HotSeatPage() {
     setSelectedPieceId(null);
     setLegalMoves([]);
     setPlacementSelectedPieceId(null);
+    setBoardFlipped(false);
+    setDeferTurnFlipUntil(0);
     setError("");
 
     const useBudget = forceBudget ?? Boolean(nextBundle.setup.budgetMode?.enabled);
@@ -225,6 +265,8 @@ export function HotSeatPage() {
       setActiveSetup(null);
       setDraft(null);
       setPlacementSelectedPieceId(null);
+      setBoardFlipped(false);
+      setDeferTurnFlipUntil(0);
     } catch {
       setError("Failed to load this mode. If you are on a new account, create/import setups first.");
     }
@@ -247,6 +289,8 @@ export function HotSeatPage() {
     setSelectedPieceId(null);
     setLegalMoves([]);
     setPlacementSelectedPieceId(null);
+    setBoardFlipped(false);
+    setDeferTurnFlipUntil(0);
     setError("");
   }
 
@@ -279,6 +323,8 @@ export function HotSeatPage() {
     }
     setDraft((prev) => (prev ? { ...prev, stage: "place" } : prev));
     setPlacementSelectedPieceId(null);
+    setBoardFlipped(false);
+    setDeferTurnFlipUntil(0);
     setError("");
   }
 
@@ -344,39 +390,34 @@ export function HotSeatPage() {
     }
   }
 
-  function onPlacementPieceClick(piece: PieceInstance) {
-    if (!draft || draft.stage !== "place") return;
-    if (piece.side !== draft.activeSide) return;
+  function onPlacementSquareClick(x: number, y: number) {
+    if (!draft || !bundle || draft.stage !== "place") return;
 
-    if (placementSelectedPieceId === piece.instanceId) {
-      setDraft((prev) => {
-        if (!prev) return prev;
-        const side = prev.activeSide;
-        return {
-          ...prev,
-          placements: {
-            ...prev.placements,
-            [side]: prev.placements[side].filter((p) => p.instanceId !== piece.instanceId),
-          },
-        };
-      });
-      setPlacementSelectedPieceId(null);
+    const side = draft.activeSide;
+    const occupant = draftAllPiecesOnBoard.find((p) => p.x === x && p.y === y);
+
+    if (occupant && occupant.side === side) {
+      if (placementSelectedPieceId === occupant.instanceId) {
+        setDraft((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            placements: {
+              ...prev.placements,
+              [side]: prev.placements[side].filter((p) => p.instanceId !== occupant.instanceId),
+            },
+          };
+        });
+        setPlacementSelectedPieceId(null);
+      } else {
+        setPlacementSelectedPieceId(occupant.instanceId);
+      }
       return;
     }
 
-    setPlacementSelectedPieceId(piece.instanceId);
-    setError("");
-  }
-
-  function onPlacementSquareClick(x: number, y: number) {
-    if (!draft || !bundle || draft.stage !== "place") return;
     if (!placementSelectedPieceId) return;
-
-    const side = draft.activeSide;
     if (!isPlacementRow(side, y, bundle.board.height)) return;
-
-    const occupant = draftAllPiecesOnBoard.find((p) => p.x === x && p.y === y);
-    if (occupant && occupant.instanceId !== placementSelectedPieceId) return;
+    if (occupant) return;
 
     setDraft((prev) => {
       if (!prev) return prev;
@@ -433,6 +474,8 @@ export function HotSeatPage() {
     setState(createGameFromSetup(runtimeSetup, bundle.board));
     setDraft(null);
     setPlacementSelectedPieceId(null);
+    setBoardFlipped(false);
+    setDeferTurnFlipUntil(0);
     setError("");
   }
 
@@ -451,6 +494,12 @@ export function HotSeatPage() {
     if (clickedMove) {
       try {
         const next = applyMove(state, clickedMove);
+        const turnChanged = next.currentTurnIndex !== state.currentTurnIndex;
+        if (next.status === "ongoing" && turnChanged) {
+          setDeferTurnFlipUntil(Date.now() + TURN_FLIP_DELAY_MS);
+        } else {
+          setDeferTurnFlipUntil(0);
+        }
         setState(next);
         if (next.status === "finished") playSound(winAudioRef.current);
         else playSound(moveAudioRef.current);
@@ -476,6 +525,7 @@ export function HotSeatPage() {
   function restart() {
     if (!bundle || !activeSetup) return;
     setState(createGameFromSetup(activeSetup, bundle.board));
+    setDeferTurnFlipUntil(0);
     setSelectedPieceId(null);
     setLegalMoves([]);
   }
@@ -502,6 +552,7 @@ export function HotSeatPage() {
             <strong>Mode: {playMode === "epistemate" ? "Epistemate" : playMode === "chess" ? "Chess" : "Custom"}</strong>
             <div className="row">
               <button onClick={resetToModePicker}>Change mode</button>
+              <button onClick={() => setBoardFlipped((v) => !v)}>Flip board</button>
               <button onClick={() => setSoundEnabled((v) => !v)}>Sound: {soundEnabled ? "On" : "Off"}</button>
             </div>
           </div>
@@ -584,14 +635,17 @@ export function HotSeatPage() {
                   }}
                 >
                   {Array.from({ length: bundle.board.height }).flatMap((_, rowIndex) => {
-                    const y = rowIndex;
-                    return Array.from({ length: bundle.board.width }).map((__, x) => {
+                    const displayY = rowIndex;
+                    return Array.from({ length: bundle.board.width }).map((__, displayX) => {
+                      const real = coordFromDisplay(displayX, displayY, bundle.board.width, bundle.board.height, boardFlipped);
+                      const x = real.x;
+                      const y = real.y;
                       const piece = draftVisiblePiecesOnBoard.find((p) => p.x === x && p.y === y);
                       return (
                         <button
                           key={`draft-${x},${y}`}
                           type="button"
-                          className={`square ${squareColor(x, y)} ${isPlacementRow(draft.activeSide, y, bundle.board.height) ? "" : ""}`}
+                          className={`square ${squareColor(x, y)}`}
                           onClick={() => onPlacementSquareClick(x, y)}
                           onDragOver={(e) => e.preventDefault()}
                           onDrop={(e) => {
@@ -605,10 +659,6 @@ export function HotSeatPage() {
                               style={{ outline: placementSelectedPieceId === piece.instanceId ? "2px solid #2f6fed" : undefined }}
                               src={pieceAssetForSide(bundle.setup, piece)}
                               draggable={piece.side === draft.activeSide}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onPlacementPieceClick(piece);
-                              }}
                               onDragStart={(e) => {
                                 if (piece.side !== draft.activeSide) return;
                                 const payload: DragPayload = { kind: "placed", instanceId: piece.instanceId, side: draft.activeSide };
@@ -644,8 +694,11 @@ export function HotSeatPage() {
         <div className="row" style={{ alignItems: "flex-start" }}>
           <div className="board" style={{ gridTemplateColumns: `repeat(${bundle.board.width}, 56px)`, width: bundle.board.width * 56 }}>
             {Array.from({ length: bundle.board.height }).flatMap((_, rowIndex) => {
-              const y = rowIndex;
-              return Array.from({ length: bundle.board.width }).map((__, x) => {
+              const displayY = rowIndex;
+              return Array.from({ length: bundle.board.width }).map((__, displayX) => {
+                const real = coordFromDisplay(displayX, displayY, bundle.board.width, bundle.board.height, boardFlipped);
+                const x = real.x;
+                const y = real.y;
                 const piece = [...state.pieces.values()].find((p) => p.x === x && p.y === y);
                 const isSelected = selectedPieceId != null && piece?.instanceId === selectedPieceId;
                 const isLegal = legalMoves.some((m) => coordMatch(m.to, { x, y }));
