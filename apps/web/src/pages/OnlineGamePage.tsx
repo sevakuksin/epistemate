@@ -14,6 +14,17 @@ function coordMatch(a: { x: number; y: number }, b: { x: number; y: number }): b
   return a.x === b.x && a.y === b.y;
 }
 
+function coordFromDisplay(
+  displayX: number,
+  displayY: number,
+  width: number,
+  height: number,
+  flipped: boolean
+): { x: number; y: number } {
+  if (!flipped) return { x: displayX, y: displayY };
+  return { x: width - 1 - displayX, y: height - 1 - displayY };
+}
+
 function moveLabel(m: CompactMove): string {
   return `${m.pieceId}: (${m.from.x},${m.from.y}) -> (${m.to.x},${m.to.y})${m.captureId ? ` x ${m.captureId}` : ""}`;
 }
@@ -44,6 +55,8 @@ export function OnlineGamePage() {
     if (game.black_user_id === user.id) return "black";
     return null;
   }, [game, user]);
+
+  const boardFlipped = mySide === "black";
 
   async function refresh() {
     if (!gameId) return;
@@ -184,8 +197,17 @@ export function OnlineGamePage() {
               }}
             >
               {Array.from({ length: state.board.height }).flatMap((_, rowIndex) => {
-                const y = rowIndex;
-                return Array.from({ length: state.board.width }).map((__, x) => {
+                const displayY = rowIndex;
+                return Array.from({ length: state.board.width }).map((__, displayX) => {
+                  const real = coordFromDisplay(
+                    displayX,
+                    displayY,
+                    state.board.width,
+                    state.board.height,
+                    boardFlipped
+                  );
+                  const x = real.x;
+                  const y = real.y;
                   const piece = [...state.pieces.values()].find((p) => p.x === x && p.y === y);
                   const isSelected = selectedPieceId != null && piece?.instanceId === selectedPieceId;
                   const isLegal = legalMoves.some((m) => coordMatch(m.to, { x, y }));
