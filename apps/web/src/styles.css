@@ -247,18 +247,18 @@ a:focus-visible {
   box-shadow: none;
 }
 
-/* Responsive board: cells shrink when the container is narrower than N×56px */
+/* Responsive board: shrink cells on narrow viewports.
+   Avoid 100cqw: it tied cell size to .board-wrap width while the grid depended on --cell,
+   which could collapse to 0 in flex layouts. */
 .board-wrap {
-  container-type: inline-size;
-  container-name: game-board;
   width: 100%;
   max-width: max-content;
+  min-width: min(100%, calc(var(--board-cols, 8) * 56px));
 }
 
 .board.board-fluid {
-  /* Fallback when container query units are unavailable */
   --cell: 56px;
-  --cell: min(56px, calc(100cqw / var(--board-cols, 8)));
+  --cell: min(56px, calc((100vw - 40px) / var(--board-cols, 8)));
   max-width: 100%;
 }
 
