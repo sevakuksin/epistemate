@@ -998,11 +998,17 @@ app.post("/api/games/:id/moves", requireAuth, (req: AuthRequest, res) => {
       ).run(
         JSON.stringify(serializedNext),
         nextState.sides[nextState.currentTurnIndex],
-        nextState.status === "finished" ? "finished" : "active",
+        nextState.status === "finished"
+          ? nextState.winnerSide
+            ? "finished"
+            : "draw"
+          : "active",
         nextState.status === "finished"
           ? nextState.winnerSide === "white"
             ? game.white_user_id
-            : game.black_user_id
+            : nextState.winnerSide === "black"
+              ? game.black_user_id
+              : null
           : null,
         ts,
         game.id
@@ -1178,16 +1184,28 @@ app.delete("/api/setups/:id", requireAuth, (req: AuthRequest, res) => {
 
 app.get("/api/setup-bundle/:id", requireAuth, (req: AuthRequest, res) => {
   const userId = req.userId!;
-  const setup = getDoc("setup", userId, req.params.id) as GameSetup | null;
+  const setupId = req.params.id;
+
+  let ownerUserId = userId;
+  let setup = getDoc("setup", ownerUserId, setupId) as GameSetup | null;
+
+  // Built-in presets are stored under demo user; allow loading them for all users.
+  if (!setup && ["setup_classic_8x8", "setup_epistemate", "setup_demo"].includes(setupId)) {
+    ownerUserId = DEMO_USER_ID;
+    setup = getDoc("setup", ownerUserId, setupId) as GameSetup | null;
+  }
+
   if (!setup) {
     res.status(404).json({ error: "setup not found" });
     return;
   }
-  const board = getDoc("board", userId, setup.boardId) as BoardDefinition | null;
+
+  const board = getDoc("board", ownerUserId, setup.boardId) as BoardDefinition | null;
   if (!board) {
     res.status(404).json({ error: "board for setup not found" });
     return;
   }
+
   res.json({ setup, board, pieceTypes: setup.pieceTypes });
 });
 

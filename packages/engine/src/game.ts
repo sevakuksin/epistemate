@@ -148,14 +148,20 @@ function applyPieceStateUpdates(
     }
   }
 
-  if (hasHook(state, before, "vygotskyEvolution") && captured) {
+  if (hasHook(state, before, "vygotskyEvolution")) {
     const typeDef = state.pieceTypes.get(before.typeId);
     const seq =
       typeDef?.behavior?.stageSequence && typeDef.behavior.stageSequence.length > 0
         ? typeDef.behavior.stageSequence
         : ["pawn", "knight", "bishop", "rook", "queen"];
     const stage = Math.floor(asNumber(before.state.stageIndex, 0));
-    nextState.stageIndex = Math.min(seq.length - 1, stage + 1);
+    const reachedLastRank =
+      (before.side === "white" && after.y === 0) ||
+      (before.side === "black" && after.y === state.board.height - 1);
+    const promoteByRank = stage === 0 && reachedLastRank;
+    if (captured || promoteByRank) {
+      nextState.stageIndex = Math.min(seq.length - 1, stage + 1);
+    }
   }
 
   return {
@@ -188,6 +194,17 @@ function applyAttentionSpanDecay(state: GameState, pieces: Map<string, PieceInst
     pieces.delete(id);
     occupancy.delete(coordKey({ x: victim.x, y: victim.y }));
   }
+}
+
+
+function hasAnyLegalMovesForCurrentSide(state: GameState): boolean {
+  const side = state.sides[state.currentTurnIndex];
+  for (const piece of state.pieces.values()) {
+    if (piece.side !== side) continue;
+    const moves = generatePseudoLegalMoves(state, piece.instanceId);
+    if (moves.length > 0) return true;
+  }
+  return false;
 }
 
 export function applyMove(state: GameState, move: CompactMove): GameState {
@@ -288,6 +305,14 @@ export function applyMove(state: GameState, move: CompactMove): GameState {
   };
 
   next = evaluateWinCondition(next, captured, moverSide);
+
+  if (next.status === "ongoing" && !hasAnyLegalMovesForCurrentSide(next)) {
+    next = {
+      ...next,
+      status: "finished",
+      winnerSide: null,
+    };
+  }
 
   if (next.status === "finished") {
     next = { ...next, currentTurnIndex: moverIndex };

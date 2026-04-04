@@ -14,10 +14,10 @@ function MenuCard({
 }) {
   return (
     <Link to={path} style={{ textDecoration: "none" }}>
-      <div className="card">
-        <h3 style={{ marginTop: 0 }}>{title}</h3>
+      <div className="card menu-card">
+        <h3>{title}</h3>
         <p>{description}</p>
-        {comingSoon ? <strong>Coming next</strong> : <strong>Open</strong>}
+        {comingSoon ? <span className="badge warn">Coming next</span> : <span className="badge ok">Open</span>}
       </div>
     </Link>
   );
@@ -29,10 +29,13 @@ export function MenuPage() {
 
   return (
     <div className="page">
-      <div className="row" style={{ justifyContent: "space-between" }}>
-        <h1>Main Menu</h1>
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">Main Menu</h1>
+          <p className="subtitle">Choose a mode and jump into play or creation.</p>
+        </div>
         <div className="row">
-          <span>Logged in as: {user?.username}</span>
+          <span className="badge">Logged in as: {user?.username}</span>
           <button
             onClick={() => {
               void logout().then(() => navigate("/login"));
@@ -47,8 +50,7 @@ export function MenuPage() {
         <MenuCard
           title="Vs Player"
           path="/play/vs-player"
-          description="Network multiplayer (placeholder for now)."
-          comingSoon
+          description="Live online multiplayer with invites, draft, and realtime sync."
         />
         <MenuCard title="Vs NPC" path="/play/vs-npc" description="Play against AI (placeholder)." comingSoon />
         <MenuCard title="Create" path="/create" description="Define piece types, boards, and setups." />

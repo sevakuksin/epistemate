@@ -4,6 +4,8 @@ import { applyMove, createGameFromSetup, generatePseudoLegalMoves } from "@cv/en
 import type { BoardDefinition, GameSetup, PieceInstance, PieceTypeDefinition } from "@cv/shared";
 import { Link } from "react-router-dom";
 import { api } from "../api";
+import { PieceImage } from "../components/PieceImage";
+import { DraftPieceMarket } from "../components/DraftPieceMarket";
 import { useAuth } from "../state/auth";
 
 type Bundle = {
@@ -51,11 +53,36 @@ function squareColor(x: number, y: number): "light" | "dark" {
   return (x + y) % 2 === 0 ? "light" : "dark";
 }
 
-function moveLabel(m: CompactMove): string {
+/** Draft / shop: real names including Placebo. */
+function draftPieceDisplayName(typeDef: PieceTypeDefinition | undefined): string {
+  return typeDef?.name ?? "Piece";
+}
+
+/** Hot Seat gameplay only: never surface “Placebo” in text — show as Queen. */
+function hotSeatGameplayPieceName(typeDef: PieceTypeDefinition | undefined): string {
+  if (!typeDef) return "Piece";
+  return typeDef.id === "placebo" ? "Queen" : typeDef.name;
+}
+
+function coordText(x: number, y: number): string {
+  return `${String.fromCharCode(97 + x)}${y + 1}`;
+}
+
+function moveLabel(state: GameState, setup: GameSetup, m: CompactMove): string {
+  const movedPiece = state.pieces.get(m.pieceId) ?? state.capturedPieces.find((p) => p.instanceId === m.pieceId);
+  const movedType = setup.pieceTypes.find((t) => t.id === movedPiece?.typeId);
+  const movedName = hotSeatGameplayPieceName(movedType);
+  const captureName = m.captureId
+    ? (() => {
+        const captured = state.capturedPieces.find((p) => p.instanceId === m.captureId) ?? state.pieces.get(m.captureId);
+        const capturedType = setup.pieceTypes.find((t) => t.id === captured?.typeId);
+        return hotSeatGameplayPieceName(capturedType);
+      })()
+    : null;
   const castlePart = m.companionMove
-    ? ` + ${m.companionMove.pieceId}: (${m.companionMove.from.x},${m.companionMove.from.y}) -> (${m.companionMove.to.x},${m.companionMove.to.y})`
+    ? ` + castle ${coordText(m.companionMove.from.x, m.companionMove.from.y)}-${coordText(m.companionMove.to.x, m.companionMove.to.y)}`
     : "";
-  return `${m.pieceId}: (${m.from.x},${m.from.y}) -> (${m.to.x},${m.to.y})${m.captureId ? ` x ${m.captureId}` : ""}${castlePart}`;
+  return `${movedName} ${coordText(m.from.x, m.from.y)}-${coordText(m.to.x, m.to.y)}${captureName ? ` x ${captureName}` : ""}${castlePart}`;
 }
 
 function piecePrice(piece: PieceTypeDefinition): number {
@@ -110,7 +137,8 @@ export function HotSeatPage() {
   const [deferTurnFlipUntil, setDeferTurnFlipUntil] = useState(0);
 
   const moveAudioRef = useRef<HTMLAudioElement | null>(null);
-  const winAudioRef = useRef<HTMLAudioElement | null>(null);
+  const captureAudioRef = useRef<HTMLAudioElement | null>(null);
+  const drawAudioRef = useRef<HTMLAudioElement | null>(null);
 
   function playSound(audio: HTMLAudioElement | null) {
     if (!soundEnabled || !audio) return;
@@ -123,13 +151,16 @@ export function HotSeatPage() {
   }
 
   useEffect(() => {
-    moveAudioRef.current = new Audio("/assets/sfx/move.mp3");
+    moveAudioRef.current = new Audio("/assets/sfx/move-self.mp3");
     moveAudioRef.current.volume = 0.5;
-    winAudioRef.current = new Audio("/assets/sfx/win.mp3");
-    winAudioRef.current.volume = 0.65;
+    captureAudioRef.current = new Audio("/assets/sfx/capture.mp3");
+    captureAudioRef.current.volume = 0.56;
+    drawAudioRef.current = new Audio("/assets/sfx/draw.mp3");
+    drawAudioRef.current.volume = 0.62;
     return () => {
       moveAudioRef.current = null;
-      winAudioRef.current = null;
+      captureAudioRef.current = null;
+      drawAudioRef.current = null;
     };
   }, []);
 
@@ -443,7 +474,7 @@ export function HotSeatPage() {
       const need = requiredCount(side, piece.id);
       const have = placedCount(side, piece.id);
       if (have !== need) {
-        setError(`Place all selected ${piece.name} pieces for ${side}.`);
+        setError(`Place all selected ${draftPieceDisplayName(piece)} pieces for ${side}.`);
         return;
       }
     }
@@ -501,8 +532,15 @@ export function HotSeatPage() {
           setDeferTurnFlipUntil(0);
         }
         setState(next);
-        if (next.status === "finished") playSound(winAudioRef.current);
-        else playSound(moveAudioRef.current);
+        const appliedMove = next.moveHistory[next.moveHistory.length - 1];
+        if (next.status === "finished") {
+          // Hot seat is shared-device, so draw SFX is used for end state.
+          playSound(drawAudioRef.current);
+        } else if (appliedMove?.captureId) {
+          playSound(captureAudioRef.current);
+        } else {
+          playSound(moveAudioRef.current);
+        }
         setSelectedPieceId(null);
         setLegalMoves([]);
       } catch {
@@ -532,13 +570,13 @@ export function HotSeatPage() {
 
   return (
     <div className="page">
-      <div className="row" style={{ justifyContent: "space-between" }}>
-        <h1>Hot Seat</h1>
+      <div className="page-header">
+        <div><h1 className="page-title">Hot Seat</h1><p className="subtitle">Local pass-and-play with Epistemate draft support.</p></div>
         <Link to="/">Back to menu</Link>
       </div>
 
       {!playMode ? (
-        <div className="card" style={{ marginBottom: 12 }}>
+        <div className="card card-elevated" style={{ marginBottom: 12 }}>
           <h3>Choose Mode</h3>
           <div className="row">
             <button onClick={() => void chooseMode("chess")}>Chess</button>
@@ -547,7 +585,7 @@ export function HotSeatPage() {
           </div>
         </div>
       ) : (
-        <div className="card" style={{ marginBottom: 12 }}>
+        <div className="card card-elevated" style={{ marginBottom: 12 }}>
           <div className="row" style={{ justifyContent: "space-between" }}>
             <strong>Mode: {playMode === "epistemate" ? "Epistemate" : playMode === "chess" ? "Chess" : "Custom"}</strong>
             <div className="row">
@@ -579,7 +617,7 @@ export function HotSeatPage() {
         </div>
       )}
 
-      {error ? <p style={{ color: "#b00020" }}>{error}</p> : null}
+      {error ? <p className="error-text">{error}</p> : null}
 
       {isDrafting && bundle && draft ? (
         <div className="card" style={{ marginBottom: 12 }}>
@@ -588,24 +626,16 @@ export function HotSeatPage() {
           <p>Placement rule: only your first two rows are allowed.</p>
 
           {draft.stage === "buy" ? (
-            <>
-              {bundle.setup.pieceTypes.map((piece) => {
-                const isKing = piece.tags?.includes("king");
-                const price = isKing ? 0 : piecePrice(piece);
-                const count = draft.buyCounts[piece.id]?.[draft.activeSide] ?? 0;
-                return (
-                  <div key={piece.id} className="row" style={{ marginBottom: 6, justifyContent: "space-between" }}>
-                    <span>{piece.name} (<code>{piece.id}</code>) - cost {price}{isKing ? " (auto included)" : ""}</span>
-                    <div className="row">
-                      <button disabled={isKing} onClick={() => adjustBuy(draft.activeSide, piece.id, -1)}>-</button>
-                      <span>{count}</span>
-                      <button disabled={isKing} onClick={() => adjustBuy(draft.activeSide, piece.id, 1)}>+</button>
-                    </div>
-                  </div>
-                );
-              })}
-              <button onClick={proceedToPlacement}>Proceed to Placement</button>
-            </>
+            <DraftPieceMarket
+              pieces={bundle.setup.pieceTypes}
+              side={draft.activeSide}
+              budgetRemaining={sideBudget.remaining}
+              budgetMax={sideBudget.max}
+              getCount={(pieceId) => draft.buyCounts[pieceId]?.[draft.activeSide] ?? 0}
+              onAdjust={(pieceId, delta) => adjustBuy(draft.activeSide, pieceId, delta)}
+              onConfirm={proceedToPlacement}
+              confirmLabel="Proceed to Placement"
+            />
           ) : (
             <>
               <div className="row" style={{ alignItems: "flex-start" }}>
@@ -620,8 +650,8 @@ export function HotSeatPage() {
                         e.dataTransfer.setData("text/plain", JSON.stringify(payload));
                       }}>
                         <div className="row" style={{ justifyContent: "space-between" }}>
-                          <span>{piece.name} x{remaining}</span>
-                          <img className="piece-img" src={typeAssetForSide(piece, draft.activeSide)} />
+                          <span>{draftPieceDisplayName(piece)} x{remaining}</span>
+                          <PieceImage className="piece-img" src={typeAssetForSide(piece, draft.activeSide)} />
                         </div>
                       </div>
                     );
@@ -647,6 +677,12 @@ export function HotSeatPage() {
                           type="button"
                           className={`square ${squareColor(x, y)}`}
                           onClick={() => onPlacementSquareClick(x, y)}
+                          draggable={Boolean(piece && piece.side === draft.activeSide)}
+                          onDragStart={(e) => {
+                            if (!piece || piece.side !== draft.activeSide) return;
+                            const payload: DragPayload = { kind: "placed", instanceId: piece.instanceId, side: draft.activeSide };
+                            e.dataTransfer.setData("text/plain", JSON.stringify(payload));
+                          }}
                           onDragOver={(e) => e.preventDefault()}
                           onDrop={(e) => {
                             e.preventDefault();
@@ -654,16 +690,10 @@ export function HotSeatPage() {
                           }}
                         >
                           {piece ? (
-                            <img
+                            <PieceImage
                               className="piece-img"
                               style={{ outline: placementSelectedPieceId === piece.instanceId ? "2px solid #2f6fed" : undefined }}
                               src={pieceAssetForSide(bundle.setup, piece)}
-                              draggable={piece.side === draft.activeSide}
-                              onDragStart={(e) => {
-                                if (piece.side !== draft.activeSide) return;
-                                const payload: DragPayload = { kind: "placed", instanceId: piece.instanceId, side: draft.activeSide };
-                                e.dataTransfer.setData("text/plain", JSON.stringify(payload));
-                              }}
                             />
                           ) : null}
                         </button>
@@ -685,8 +715,8 @@ export function HotSeatPage() {
       ) : null}
 
       {state?.status === "finished" ? (
-        <div className="card" style={{ marginBottom: 12, borderColor: "#4caf50" }}>
-          <strong>Game Over.</strong> Winner: <strong>{state.winnerSide}</strong>
+        <div className="card card-status" style={{ marginBottom: 12 }}>
+          <strong>Game Over.</strong> {state.winnerSide ? <>Winner: <strong>{state.winnerSide}</strong></> : <>Draw by stalemate.</>}
         </div>
       ) : null}
 
@@ -710,7 +740,7 @@ export function HotSeatPage() {
                     onClick={() => onSquareClick(x, y)}
                     title={`${x},${y}`}
                   >
-                    {piece ? <img className="piece-img" src={pieceAssetForSide(activeSetup, piece)} /> : null}
+                    {piece ? <PieceImage className="piece-img" src={pieceAssetForSide(activeSetup, piece)} /> : null}
                   </button>
                 );
               });
@@ -721,12 +751,16 @@ export function HotSeatPage() {
             <div className="card">
               <h3>Turn</h3>
               <p>Side to move: <strong>{state.sides[state.currentTurnIndex]}</strong></p>
-              {state.status === "finished" ? <p>Winner: <strong>{state.winnerSide}</strong></p> : null}
+              {state.status === "finished" ? <p>{state.winnerSide ? <>Winner: <strong>{state.winnerSide}</strong></> : <>Result: <strong>draw</strong></>}</p> : null}
             </div>
             <div className="card" style={{ marginTop: 12 }}>
               <h3>Selection</h3>
               {selectedPiece ? (
-                <p>{selectedPiece.instanceId} ({selectedPiece.typeId}) at ({selectedPiece.x},{selectedPiece.y})</p>
+                <p>
+                  {selectedPiece.instanceId} (
+                  {hotSeatGameplayPieceName(activeSetup.pieceTypes.find((t) => t.id === selectedPiece.typeId))}
+                  ) at ({selectedPiece.x},{selectedPiece.y})
+                </p>
               ) : (
                 <p>No selection</p>
               )}
@@ -746,11 +780,14 @@ export function HotSeatPage() {
             </div>
             <div className="card" style={{ marginTop: 12 }}>
               <h3>Move History</h3>
-              <ol>
+              <div className="move-history-compact">
                 {state.moveHistory.map((m, idx) => (
-                  <li key={`${m.pieceId}_${idx}`}>{moveLabel(m)}</li>
+                  <div className="move-history-row" key={`${m.pieceId}_${idx}`}>
+                    <span>{idx + 1}.</span>
+                    <span>{moveLabel(state, activeSetup, m)}</span>
+                  </div>
                 ))}
-              </ol>
+              </div>
             </div>
           </div>
         </div>

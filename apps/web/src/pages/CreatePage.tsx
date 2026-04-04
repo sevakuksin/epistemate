@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { BoardDefinition, GameSetup, Pattern, PieceInstance, PieceTypeDefinition } from "@cv/shared";
 import { Link, useLocation } from "react-router-dom";
 import { api } from "../api";
+import { PieceImage } from "../components/PieceImage";
 import { useAuth } from "../state/auth";
 
 function jsonText(value: unknown): string {
@@ -23,10 +24,10 @@ function squareColor(x: number, y: number): "light" | "dark" {
 const defaultPiece: PieceTypeDefinition = {
   id: "",
   name: "",
-  asset: "/assets/placeholders/rook.svg",
+  asset: "/assets/placeholders/rook/black.svg",
   assetBySide: {
-    white: "/assets/placeholders/rook_white.svg",
-    black: "/assets/placeholders/rook.svg",
+    white: "/assets/placeholders/rook/white.svg",
+    black: "/assets/placeholders/rook/black.svg",
   },
   movementRules: [
     {
@@ -99,21 +100,20 @@ const DIAG = [
 ];
 
 const templates: PieceTemplate[] = [
-  { id: "king", name: "King", mode: "step", vectors: [...ORTHO, ...DIAG], whiteImage: "/assets/placeholders/king_white.svg", blackImage: "/assets/placeholders/king.svg", tags: ["king"], hooks: ["castleLike"], price: 12 },
-  { id: "queen", name: "Queen", mode: "slide", vectors: [...ORTHO, ...DIAG], whiteImage: "/assets/placeholders/queen_white.svg", blackImage: "/assets/placeholders/queen.svg", price: 9 },
-  { id: "rook", name: "Rook", mode: "slide", vectors: ORTHO, whiteImage: "/assets/placeholders/rook_white.svg", blackImage: "/assets/placeholders/rook.svg", price: 6 },
-  { id: "bishop", name: "Bishop", mode: "slide", vectors: DIAG, whiteImage: "/assets/placeholders/bishop_white.svg", blackImage: "/assets/placeholders/bishop.svg", price: 4 },
-  { id: "knight", name: "Knight", mode: "jump", vectors: [{ dx: 1, dy: 2 }, { dx: 2, dy: 1 }, { dx: -1, dy: 2 }, { dx: -2, dy: 1 }, { dx: 1, dy: -2 }, { dx: 2, dy: -1 }, { dx: -1, dy: -2 }, { dx: -2, dy: -1 }], whiteImage: "/assets/placeholders/knight_white.svg", blackImage: "/assets/placeholders/knight.svg", price: 3 },
-  { id: "pawn", name: "Pawn", mode: "step", vectors: [{ dx: 0, dy: 1 }], whiteImage: "/assets/placeholders/pawn_white.svg", blackImage: "/assets/placeholders/pawn.svg", tags: ["pawn"], relativeToSide: true, price: 1 },
-  { id: "wiggler", name: "Wiggler", mode: "step", vectors: ORTHO, whiteImage: "/assets/placeholders/wiggler_white.svg", blackImage: "/assets/placeholders/wiggler.svg", hooks: ["noRepeatDirection"], price: 5 },
-  { id: "hegel", name: "Hegel", mode: "slide", vectors: [...ORTHO, ...DIAG], whiteImage: "/assets/placeholders/queen_white.svg", blackImage: "/assets/placeholders/queen.svg", hooks: ["hegelDialectic"], defaultState: { lastDirectionClass: null }, price: 11 },
-  { id: "nietzsche", name: "Nietzsche", mode: "slide", vectors: [...ORTHO, ...DIAG], whiteImage: "/assets/placeholders/king_white.svg", blackImage: "/assets/placeholders/king.svg", hooks: ["nietzscheStatic"], tags: ["untargetable"], price: 7 },
-  { id: "vygotsky", name: "Vygotsky", mode: "slide", vectors: [...ORTHO, ...DIAG], whiteImage: "/assets/placeholders/pawn_white.svg", blackImage: "/assets/placeholders/pawn.svg", hooks: ["vygotskyEvolution"], behavior: { stageSequence: ["pawn", "knight", "bishop", "rook", "queen"] }, defaultState: { stageIndex: 0 }, price: 8 },
-  { id: "skinner", name: "Skinner", mode: "slide", vectors: [...ORTHO, ...DIAG], whiteImage: "/assets/placeholders/rook_white.svg", blackImage: "/assets/placeholders/rook.svg", hooks: ["skinnerReinforce"], defaultState: { mustRepeatAfterReward: false, lastMoveVector: null }, price: 8 },
-  { id: "freud", name: "Freud", mode: "slide", vectors: [...ORTHO, ...DIAG], whiteImage: "/assets/placeholders/bishop_white.svg", blackImage: "/assets/placeholders/bishop.svg", hooks: ["freudSlip"], behavior: { slipProbability: 0.25 }, price: 7 },
-  { id: "attention_span", name: "Attention Span", mode: "slide", vectors: [...ORTHO, ...DIAG], whiteImage: "/assets/placeholders/knight_white.svg", blackImage: "/assets/placeholders/knight.svg", hooks: ["attentionSpanLocal"], behavior: { attentionRadius: 1, attentionIdleLimit: 4 }, defaultState: { turnsSinceMoved: 0 }, price: 6 },
-  { id: "placebo", name: "Placebo", mode: "slide", vectors: DIAG, whiteImage: "/assets/placeholders/queen_white.svg", blackImage: "/assets/placeholders/queen.svg", displayRepresentation: "queen", price: 5 },
-  { id: "causal_loop", name: "Causal Loop", mode: "step", vectors: [{ dx: 1, dy: 0 }], whiteImage: "/assets/placeholders/wiggler_white.svg", blackImage: "/assets/placeholders/wiggler.svg", price: 10 },
+  { id: "king", name: "King", mode: "step", vectors: [...ORTHO, ...DIAG], whiteImage: "/assets/placeholders/king/white.svg", blackImage: "/assets/placeholders/king/black.svg", tags: ["king"], hooks: ["castleLike"], price: 12 },
+  { id: "queen", name: "Queen", mode: "slide", vectors: [...ORTHO, ...DIAG], whiteImage: "/assets/placeholders/queen/white.svg", blackImage: "/assets/placeholders/queen/black.svg", price: 9 },
+  { id: "rook", name: "Rook", mode: "slide", vectors: ORTHO, whiteImage: "/assets/placeholders/rook/white.svg", blackImage: "/assets/placeholders/rook/black.svg", price: 5 },
+  { id: "bishop", name: "Bishop", mode: "slide", vectors: DIAG, whiteImage: "/assets/placeholders/bishop/white.svg", blackImage: "/assets/placeholders/bishop/black.svg", price: 3 },
+  { id: "knight", name: "Knight", mode: "jump", vectors: [{ dx: 1, dy: 2 }, { dx: 2, dy: 1 }, { dx: -1, dy: 2 }, { dx: -2, dy: 1 }, { dx: 1, dy: -2 }, { dx: 2, dy: -1 }, { dx: -1, dy: -2 }, { dx: -2, dy: -1 }], whiteImage: "/assets/placeholders/knight/white.svg", blackImage: "/assets/placeholders/knight/black.svg", price: 3 },
+  { id: "pawn", name: "Pawn", mode: "step", vectors: [{ dx: 0, dy: 1 }], whiteImage: "/assets/placeholders/pawn/white.svg", blackImage: "/assets/placeholders/pawn/black.svg", tags: ["pawn"], relativeToSide: true, price: 1 },
+    { id: "hegel", name: "Hegel", mode: "slide", vectors: [...ORTHO, ...DIAG], whiteImage: "/assets/placeholders/hegel/white.svg", blackImage: "/assets/placeholders/hegel/black.svg", hooks: ["hegelDialectic"], defaultState: { lastDirectionClass: null }, price: 7 },
+  { id: "nietzsche", name: "Nietzsche", mode: "slide", vectors: [...ORTHO, ...DIAG], whiteImage: "/assets/placeholders/nietzsche/white.svg", blackImage: "/assets/placeholders/nietzsche/black.svg", hooks: ["nietzscheStatic"], tags: ["untargetable"], price: 6 },
+  { id: "vygotsky", name: "Vygotsky", mode: "slide", vectors: [...ORTHO, ...DIAG], whiteImage: "/assets/placeholders/vygotsky/white.svg", blackImage: "/assets/placeholders/vygotsky/black.svg", hooks: ["vygotskyEvolution"], behavior: { stageSequence: ["pawn", "knight", "bishop", "rook", "queen"] }, defaultState: { stageIndex: 0 }, price: 2 },
+  { id: "skinner", name: "Skinner", mode: "slide", vectors: [...ORTHO, ...DIAG], whiteImage: "/assets/placeholders/skinner/white.svg", blackImage: "/assets/placeholders/skinner/black.svg", hooks: ["skinnerReinforce"], defaultState: { mustRepeatAfterReward: false, lastMoveVector: null }, price: 8 },
+  { id: "freud", name: "Freud", mode: "slide", vectors: [...ORTHO, ...DIAG], whiteImage: "/assets/placeholders/freud/white.svg", blackImage: "/assets/placeholders/freud/black.svg", hooks: ["freudSlip"], behavior: { slipProbability: 0.25 }, price: 7 },
+  { id: "attention_span", name: "Attention Span", mode: "slide", vectors: [...ORTHO, ...DIAG], whiteImage: "/assets/placeholders/attention_span/white.svg", blackImage: "/assets/placeholders/attention_span/black.svg", hooks: ["attentionSpanLocal"], behavior: { attentionRadius: 1, attentionIdleLimit: 4 }, defaultState: { turnsSinceMoved: 0 }, price: 1 },
+  { id: "placebo", name: "Placebo", mode: "slide", vectors: DIAG, whiteImage: "/assets/placeholders/placebo/white.svg", blackImage: "/assets/placeholders/placebo/black.svg", displayRepresentation: "queen", price: 4 },
+  { id: "causal_loop", name: "Causal Loop", mode: "step", vectors: [{ dx: 1, dy: 0 }], whiteImage: "/assets/placeholders/causal_loop/white.svg", blackImage: "/assets/placeholders/causal_loop/black.svg", price: 10 },
 ];
 
 function vectorKey(dx: number, dy: number): string {
@@ -276,20 +276,20 @@ export function CreatePage() {
 
   return (
     <div className="page">
-      <div className="row" style={{ justifyContent: "space-between" }}>
-        <h1>Create</h1>
+      <div className="page-header">
+        <div><h1 className="page-title">Create</h1><p className="subtitle">Craft pieces, boards, and setups with visual tools.</p></div>
         <div className="row">
           <Link to="/create/piece"><button type="button">Create Piece</button></Link>
           <Link to="/create/board"><button type="button">Create Board</button></Link>
           <Link to="/">Back to menu</Link>
         </div>
       </div>
-      {status ? <p>{status}</p> : null}
+      {status ? <p className="badge ok">{status}</p> : null}
       {mode === null ? <p>Choose an endpoint: Create Piece or Create Board.</p> : null}
 
-      <div className="row" style={{ alignItems: "stretch" }}>
+      <div className="grid-2" style={{ alignItems: "stretch" }}>
         {mode === "piece" ? (
-          <section className="card" style={{ flex: 1, minWidth: 360 }}>
+          <section className="card card-elevated" style={{ minWidth: 360 }}>
             <h2>Piece Creator</h2>
             <label>
               Quick template
@@ -308,14 +308,14 @@ export function CreatePage() {
               <label style={{ flex: 1 }}>
                 White image (drop png/svg)
                 <div className="card" style={{ minHeight: 74, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const file = e.dataTransfer.files[0]; if (file) void setSideImage("white", file); }}>
-                  <img className="piece-img" src={pieceDraft.assetBySide?.white || pieceDraft.asset} />
+                  <PieceImage className="piece-img" src={pieceDraft.assetBySide?.white || pieceDraft.asset} />
                   <input type="file" accept=".png,.svg,image/png,image/svg+xml" onChange={(e) => { const f = e.target.files?.[0]; if (f) void setSideImage("white", f); }} />
                 </div>
               </label>
               <label style={{ flex: 1 }}>
                 Black image (drop png/svg)
                 <div className="card" style={{ minHeight: 74, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const file = e.dataTransfer.files[0]; if (file) void setSideImage("black", file); }}>
-                  <img className="piece-img" src={pieceDraft.assetBySide?.black || pieceDraft.asset} />
+                  <PieceImage className="piece-img" src={pieceDraft.assetBySide?.black || pieceDraft.asset} />
                   <input type="file" accept=".png,.svg,image/png,image/svg+xml" onChange={(e) => { const f = e.target.files?.[0]; if (f) void setSideImage("black", f); }} />
                 </div>
               </label>
@@ -375,7 +375,7 @@ export function CreatePage() {
                           setSelectedVectorKeys((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
                         }}
                       >
-                        {isCenter ? <img className="piece-img" style={{ width: 20, height: 20 }} src={pieceDraft.assetBySide?.white || pieceDraft.asset} /> : ""}
+                        {isCenter ? <PieceImage className="piece-img" style={{ width: 20, height: 20 }} src={pieceDraft.assetBySide?.white || pieceDraft.asset} /> : ""}
                       </button>
                     );
                   })
@@ -396,7 +396,7 @@ export function CreatePage() {
         ) : null}
 
         {mode === "board" ? (
-          <section className="card" style={{ flex: 1, minWidth: 360 }}>
+          <section className="card card-elevated" style={{ minWidth: 360 }}>
             <h2>Board / Setup Creator</h2>
             <h3>Board</h3>
             <div className="row">

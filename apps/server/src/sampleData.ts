@@ -71,10 +71,10 @@ export function ensureDemoPreset(): void {
   const king: PieceTypeDefinition = {
     id: "king",
     name: "King",
-    asset: "/assets/placeholders/king.svg",
+    asset: "/assets/placeholders/king/black.svg",
     assetBySide: {
-      white: "/assets/placeholders/king_white.svg",
-      black: "/assets/placeholders/king.svg",
+      white: "/assets/placeholders/king/white.svg",
+      black: "/assets/placeholders/king/black.svg",
     },
     movementRules: [{ kind: "step", vectors: [...ORTHO, ...DIAG], range: 1, blockers: "all" }],
     captureRules: [],
@@ -86,10 +86,10 @@ export function ensureDemoPreset(): void {
   const queen: PieceTypeDefinition = {
     id: "queen",
     name: "Queen",
-    asset: "/assets/placeholders/queen.svg",
+    asset: "/assets/placeholders/queen/black.svg",
     assetBySide: {
-      white: "/assets/placeholders/queen_white.svg",
-      black: "/assets/placeholders/queen.svg",
+      white: "/assets/placeholders/queen/white.svg",
+      black: "/assets/placeholders/queen/black.svg",
     },
     movementRules: [{ kind: "slide", vectors: [...ORTHO, ...DIAG], blockers: "all" }],
     captureRules: [],
@@ -100,38 +100,38 @@ export function ensureDemoPreset(): void {
   const rook: PieceTypeDefinition = {
     id: "rook",
     name: "Rook",
-    asset: "/assets/placeholders/rook.svg",
+    asset: "/assets/placeholders/rook/black.svg",
     assetBySide: {
-      white: "/assets/placeholders/rook_white.svg",
-      black: "/assets/placeholders/rook.svg",
+      white: "/assets/placeholders/rook/white.svg",
+      black: "/assets/placeholders/rook/black.svg",
     },
     movementRules: [{ kind: "slide", vectors: ORTHO, blockers: "all" }],
     captureRules: [],
     tags: ["heavy"],
-    price: 6,
+    price: 5,
   };
 
   const bishop: PieceTypeDefinition = {
     id: "bishop",
     name: "Bishop",
-    asset: "/assets/placeholders/bishop.svg",
+    asset: "/assets/placeholders/bishop/black.svg",
     assetBySide: {
-      white: "/assets/placeholders/bishop_white.svg",
-      black: "/assets/placeholders/bishop.svg",
+      white: "/assets/placeholders/bishop/white.svg",
+      black: "/assets/placeholders/bishop/black.svg",
     },
     movementRules: [{ kind: "slide", vectors: DIAG, blockers: "all" }],
     captureRules: [],
     tags: ["minor"],
-    price: 4,
+    price: 3,
   };
 
   const knight: PieceTypeDefinition = {
     id: "knight",
     name: "Knight",
-    asset: "/assets/placeholders/knight.svg",
+    asset: "/assets/placeholders/knight/black.svg",
     assetBySide: {
-      white: "/assets/placeholders/knight_white.svg",
-      black: "/assets/placeholders/knight.svg",
+      white: "/assets/placeholders/knight/white.svg",
+      black: "/assets/placeholders/knight/black.svg",
     },
     movementRules: [
       {
@@ -157,10 +157,10 @@ export function ensureDemoPreset(): void {
   const pawn: PieceTypeDefinition = {
     id: "pawn",
     name: "Pawn",
-    asset: "/assets/placeholders/pawn.svg",
+    asset: "/assets/placeholders/pawn/black.svg",
     assetBySide: {
-      white: "/assets/placeholders/pawn_white.svg",
-      black: "/assets/placeholders/pawn.svg",
+      white: "/assets/placeholders/pawn/white.svg",
+      black: "/assets/placeholders/pawn/black.svg",
     },
     movementRules: [
       { kind: "step", vectors: [{ dx: 0, dy: 1 }], range: 1, blockers: "all", relativeToSide: true },
@@ -186,10 +186,10 @@ export function ensureDemoPreset(): void {
   const wiggler: PieceTypeDefinition = {
     id: "wiggler",
     name: "Wiggler",
-    asset: "/assets/placeholders/wiggler.svg",
+    asset: "/assets/placeholders/wiggler/black.svg",
     assetBySide: {
-      white: "/assets/placeholders/wiggler_white.svg",
-      black: "/assets/placeholders/wiggler.svg",
+      white: "/assets/placeholders/wiggler/white.svg",
+      black: "/assets/placeholders/wiggler/black.svg",
     },
     movementRules: [{ kind: "step", vectors: ORTHO, range: 1, blockers: "all" }],
     captureRules: [],
@@ -206,30 +206,42 @@ export function ensureDemoPreset(): void {
   const hegel: PieceTypeDefinition = {
     id: "hegel",
     name: "Hegel",
-    asset: "/assets/placeholders/queen.svg",
+    asset: "/assets/placeholders/hegel/black.svg",
+    assetBySide: {
+      white: "/assets/placeholders/hegel/white.svg",
+      black: "/assets/placeholders/hegel/black.svg",
+    },
     movementRules: [{ kind: "slide", vectors: [...ORTHO, ...DIAG], blockers: "all" }],
     captureRules: [],
     pieceHooks: ["hegelDialectic"],
     defaultState: { lastDirectionClass: null },
     tags: ["philosophy"],
-    price: 11,
+    price: 7,
   };
 
   const nietzsche: PieceTypeDefinition = {
     id: "nietzsche",
     name: "Nietzsche",
-    asset: "/assets/placeholders/king.svg",
+    asset: "/assets/placeholders/nietzsche/black.svg",
+    assetBySide: {
+      white: "/assets/placeholders/nietzsche/white.svg",
+      black: "/assets/placeholders/nietzsche/black.svg",
+    },
     movementRules: [{ kind: "slide", vectors: [...ORTHO, ...DIAG], blockers: "all" }],
     captureRules: [],
     pieceHooks: ["nietzscheStatic"],
     tags: ["untargetable", "philosophy"],
-    price: 7,
+    price: 6,
   };
 
   const vygotsky: PieceTypeDefinition = {
     id: "vygotsky",
     name: "Vygotsky",
-    asset: "/assets/placeholders/pawn.svg",
+    asset: "/assets/placeholders/vygotsky/black.svg",
+    assetBySide: {
+      white: "/assets/placeholders/vygotsky/white.svg",
+      black: "/assets/placeholders/vygotsky/black.svg",
+    },
     movementRules: [
       { kind: "slide", vectors: [...ORTHO, ...DIAG], blockers: "all" },
       {
@@ -280,13 +292,17 @@ export function ensureDemoPreset(): void {
     defaultState: { stageIndex: 0 },
     behavior: { stageSequence: ["pawn", "knight", "bishop", "rook", "queen"] },
     tags: ["psychology"],
-    price: 8,
+    price: 2,
   };
 
   const skinner: PieceTypeDefinition = {
     id: "skinner",
     name: "Skinner",
-    asset: "/assets/placeholders/rook.svg",
+    asset: "/assets/placeholders/skinner/black.svg",
+    assetBySide: {
+      white: "/assets/placeholders/skinner/white.svg",
+      black: "/assets/placeholders/skinner/black.svg",
+    },
     movementRules: [{ kind: "slide", vectors: [...ORTHO, ...DIAG], blockers: "all" }],
     captureRules: [],
     pieceHooks: ["skinnerReinforce"],
@@ -299,7 +315,11 @@ export function ensureDemoPreset(): void {
   const freud: PieceTypeDefinition = {
     id: "freud",
     name: "Freud",
-    asset: "/assets/placeholders/bishop.svg",
+    asset: "/assets/placeholders/freud/black.svg",
+    assetBySide: {
+      white: "/assets/placeholders/freud/white.svg",
+      black: "/assets/placeholders/freud/black.svg",
+    },
     movementRules: [{ kind: "slide", vectors: [...ORTHO, ...DIAG], blockers: "all" }],
     captureRules: [],
     pieceHooks: ["freudSlip"],
@@ -311,25 +331,33 @@ export function ensureDemoPreset(): void {
   const attention: PieceTypeDefinition = {
     id: "attention_span",
     name: "Attention Span",
-    asset: "/assets/placeholders/knight.svg",
+    asset: "/assets/placeholders/attention_span/black.svg",
+    assetBySide: {
+      white: "/assets/placeholders/attention_span/white.svg",
+      black: "/assets/placeholders/attention_span/black.svg",
+    },
     movementRules: [{ kind: "slide", vectors: [...ORTHO, ...DIAG], blockers: "all" }],
     captureRules: [],
     pieceHooks: ["attentionSpanLocal"],
     behavior: { attentionRadius: 1, attentionIdleLimit: 4 },
     defaultState: { turnsSinceMoved: 0 },
     tags: ["cognitive"],
-    price: 6,
+    price: 1,
   };
 
   const placebo: PieceTypeDefinition = {
     id: "placebo",
     name: "Placebo",
-    asset: "/assets/placeholders/queen.svg",
+    asset: "/assets/placeholders/placebo/black.svg",
+    assetBySide: {
+      white: "/assets/placeholders/placebo/white.svg",
+      black: "/assets/placeholders/placebo/black.svg",
+    },
     movementRules: [{ kind: "slide", vectors: DIAG, blockers: "all" }],
     captureRules: [],
     displayRepresentation: "queen",
     tags: ["ui-deception"],
-    price: 5,
+    price: 4,
   };
 
   const boardDemo: BoardDefinition = {
@@ -406,7 +434,6 @@ export function ensureDemoPreset(): void {
     bishop,
     knight,
     pawn,
-    wiggler,
     hegel,
     nietzsche,
     vygotsky,

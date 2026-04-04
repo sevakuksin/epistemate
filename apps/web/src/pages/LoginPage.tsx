@@ -37,8 +37,13 @@ export function LoginPage() {
 
   return (
     <div className="page">
-      <h1>Chess Variant Pilot</h1>
-      <div className="card" style={{ maxWidth: 460 }}>
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">Chess Variant Pilot</h1>
+          <p className="subtitle">Design your rules. Play local or online.</p>
+        </div>
+      </div>
+      <div className="card card-elevated" style={{ maxWidth: 520 }}>
         <h2>{mode === "login" ? "Sign In" : "Register"}</h2>
 
         <div className="row" style={{ marginBottom: 12 }}>
@@ -93,7 +98,7 @@ export function LoginPage() {
           <button type="submit" disabled={submitting}>
             {submitting ? "Please wait..." : mode === "login" ? "Sign In" : "Create Account"}
           </button>
-          {error ? <p style={{ color: "#b00020" }}>{error}</p> : null}
+          {error ? <p className="error-text">{error}</p> : null}
         </form>
       </div>
     </div>

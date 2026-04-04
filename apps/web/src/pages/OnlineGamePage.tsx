@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import type { CompactMove, GameState } from "@cv/engine";
 import { deserializeGame, generatePseudoLegalMoves } from "@cv/engine";
 import type { GameSetup, PieceInstance, PieceTypeDefinition } from "@cv/shared";
 import { api, type GameRecord, type OnlineDraftState } from "../api";
+import { PieceImage } from "../components/PieceImage";
+import { DraftPieceMarket } from "../components/DraftPieceMarket";
 import { wsClient } from "../realtime/wsClient";
 import { useAuth } from "../state/auth";
 
@@ -26,8 +28,33 @@ function coordFromDisplay(
   return { x: width - 1 - displayX, y: height - 1 - displayY };
 }
 
-function moveLabel(m: CompactMove): string {
-  return `${m.pieceId}: (${m.from.x},${m.from.y}) -> (${m.to.x},${m.to.y})${m.captureId ? ` x ${m.captureId}` : ""}`;
+/** Draft pool / buy UI: real names including Placebo. */
+function draftPieceDisplayName(typeDef: PieceTypeDefinition | undefined): string {
+  return typeDef?.name ?? "Piece";
+}
+
+/** Active online game: mask Placebo so the opponent cannot tell from labels. */
+function onlineGameplayPieceName(typeDef: PieceTypeDefinition | undefined): string {
+  if (!typeDef) return "Piece";
+  return typeDef.id === "placebo" ? "Queen" : typeDef.name;
+}
+
+function coordText(x: number, y: number): string {
+  return `${String.fromCharCode(97 + x)}${y + 1}`;
+}
+
+function moveLabel(state: GameState, setup: GameSetup, m: CompactMove): string {
+  const movedPiece = state.pieces.get(m.pieceId) ?? state.capturedPieces.find((p) => p.instanceId === m.pieceId);
+  const movedType = setup.pieceTypes.find((t) => t.id === movedPiece?.typeId);
+  const movedName = onlineGameplayPieceName(movedType);
+  const captureName = m.captureId
+    ? (() => {
+        const captured = state.capturedPieces.find((p) => p.instanceId === m.captureId) ?? state.pieces.get(m.captureId);
+        const capturedType = setup.pieceTypes.find((t) => t.id === captured?.typeId);
+        return onlineGameplayPieceName(capturedType);
+      })()
+    : null;
+  return `${movedName} ${coordText(m.from.x, m.from.y)}-${coordText(m.to.x, m.to.y)}${captureName ? ` x ${captureName}` : ""}`;
 }
 
 function pieceAssetForSide(setup: GameSetup, piece: PieceInstance): string | undefined {
@@ -43,13 +70,13 @@ function typeAssetForSide(typeDef: PieceTypeDefinition, side: "white" | "black")
   return typeDef.assetBySide?.[side] ?? typeDef.asset;
 }
 
+function isPlacementRow(side: "white" | "black", y: number, boardHeight: number): boolean {
+  return side === "white" ? y >= boardHeight - 2 : y <= 1;
+}
+
 function piecePrice(piece: PieceTypeDefinition): number {
   if (piece.tags?.includes("king")) return 0;
   return typeof piece.price === "number" ? piece.price : 1;
-}
-
-function isPlacementRow(side: "white" | "black", y: number, boardHeight: number): boolean {
-  return side === "white" ? y >= boardHeight - 2 : y <= 1;
 }
 
 export function OnlineGamePage() {
@@ -65,6 +92,16 @@ export function OnlineGamePage() {
   const [poolSelectedTypeId, setPoolSelectedTypeId] = useState<string | null>(null);
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(true);
+  const [resultToast, setResultToast] = useState<{ tone: "ok" | "danger" | "warn"; text: string } | null>(null);
+
+  const moveAudioRef = useRef<HTMLAudioElement | null>(null);
+  const captureAudioRef = useRef<HTMLAudioElement | null>(null);
+  const winAudioRef = useRef<HTMLAudioElement | null>(null);
+  const lossAudioRef = useRef<HTMLAudioElement | null>(null);
+  const drawAudioRef = useRef<HTMLAudioElement | null>(null);
+  const prevMoveCountRef = useRef<number | null>(null);
+  const prevStatusRef = useRef<GameRecord["status"] | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
 
   const mySide = useMemo(() => {
     if (!game || !user) return null;
@@ -72,6 +109,80 @@ export function OnlineGamePage() {
     if (game.black_user_id === user.id) return "black" as const;
     return null;
   }, [game, user]);
+
+  function playSound(audio: HTMLAudioElement | null): void {
+    if (!audio) return;
+    try {
+      audio.currentTime = 0;
+      void audio.play();
+    } catch {
+      // no-op
+    }
+  }
+
+  useEffect(() => {
+    moveAudioRef.current = new Audio("/assets/sfx/move-self.mp3");
+    moveAudioRef.current.volume = 0.5;
+    captureAudioRef.current = new Audio("/assets/sfx/capture.mp3");
+    captureAudioRef.current.volume = 0.56;
+    winAudioRef.current = new Audio("/assets/sfx/win.mp3");
+    winAudioRef.current.volume = 0.64;
+    lossAudioRef.current = new Audio("/assets/sfx/loss.mp3");
+    lossAudioRef.current.volume = 0.64;
+    drawAudioRef.current = new Audio("/assets/sfx/draw.mp3");
+    drawAudioRef.current.volume = 0.62;
+
+    return () => {
+      moveAudioRef.current = null;
+      captureAudioRef.current = null;
+      winAudioRef.current = null;
+      lossAudioRef.current = null;
+      drawAudioRef.current = null;
+      if (toastTimerRef.current != null) {
+        window.clearTimeout(toastTimerRef.current);
+        toastTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!game || !state) return;
+
+    const currentMoveCount = state.moveHistory.length;
+    if (prevMoveCountRef.current == null) {
+      prevMoveCountRef.current = currentMoveCount;
+    } else if (currentMoveCount > prevMoveCountRef.current) {
+      const applied = state.moveHistory[currentMoveCount - 1];
+      if (applied?.captureId) playSound(captureAudioRef.current);
+      else playSound(moveAudioRef.current);
+      prevMoveCountRef.current = currentMoveCount;
+    }
+
+    const prevStatus = prevStatusRef.current;
+    if (prevStatus !== game.status && (game.status === "finished" || game.status === "draw")) {
+      if (game.status === "draw") {
+        setResultToast({ tone: "warn", text: "Game ended in a draw." });
+        playSound(drawAudioRef.current);
+      } else {
+        const iWon = Boolean(user && game.winner_user_id === user.id);
+        if (iWon) {
+          setResultToast({ tone: "ok", text: "Victory!" });
+          playSound(winAudioRef.current);
+        } else {
+          setResultToast({ tone: "danger", text: "Defeat." });
+          playSound(lossAudioRef.current);
+        }
+      }
+
+      if (toastTimerRef.current != null) window.clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = window.setTimeout(() => {
+        setResultToast(null);
+        toastTimerRef.current = null;
+      }, 2600);
+    }
+
+    prevStatusRef.current = game.status;
+  }, [game, state, user]);
 
   const boardFlipped = useMemo(() => {
     if (game?.status === "draft" && draft) return draft.activeSide === "black";
@@ -121,6 +232,9 @@ export function OnlineGamePage() {
 
   useEffect(() => {
     if (!gameId) return;
+    prevMoveCountRef.current = null;
+    prevStatusRef.current = null;
+    setResultToast(null);
     setLoading(true);
     refresh()
       .catch((e) => setStatus(e instanceof Error ? e.message : "Failed to load game"))
@@ -319,6 +433,14 @@ export function OnlineGamePage() {
     }
   }
 
+  const incomingDrawOffer = Boolean(
+    game &&
+      game.status === "active" &&
+      game.draw_offered_by_user_id &&
+      user &&
+      game.draw_offered_by_user_id !== user.id
+  );
+
   const myDraftBudget = useMemo(() => {
     if (!setup || !draft || !mySide) return { spent: 0, remaining: 0, max: 0 };
     const max = draft.startingBudget;
@@ -336,16 +458,32 @@ export function OnlineGamePage() {
 
   return (
     <div className="page">
-      <div className="row" style={{ justifyContent: "space-between" }}>
-        <h1>Online Game</h1>
+      <div className="page-header">
+        <div><h1 className="page-title">Online Game</h1><p className="subtitle">Live synchronized match with resilient reconnect.</p></div>
         <Link to="/play/vs-player">Back to online lobby</Link>
       </div>
 
-      {status ? <p>{status}</p> : null}
+      {status ? <p className="badge warn">{status}</p> : null}
+
+      {resultToast ? (
+        <div className={`result-toast ${resultToast.tone}`}>{resultToast.text}</div>
+      ) : null}
+
+      {incomingDrawOffer ? (
+        <div className="card card-status" style={{ marginBottom: 12 }}>
+          <div className="row" style={{ justifyContent: "space-between" }}>
+            <strong>Opponent offered a draw</strong>
+            <div className="row">
+              <button onClick={() => void acceptDraw()}>Accept</button>
+              <button onClick={() => void declineDraw()}>Decline</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {game && setup && game.status === "draft" && draft ? (
         <>
-          <div className="card" style={{ marginBottom: 12 }}>
+          <div className="card card-elevated" style={{ marginBottom: 12 }}>
             <div className="row" style={{ justifyContent: "space-between" }}>
               <span>Game: <code>{game.id}</code> ({game.mode})</span>
               <span>Status: <strong>{game.status}</strong></span>
@@ -356,25 +494,16 @@ export function OnlineGamePage() {
           </div>
 
           {mySide && draft.activeSide === mySide && draft.stage === "buy" ? (
-            <div className="card" style={{ marginBottom: 12 }}>
-              <h3>Buy Pieces</h3>
-              {setup.pieceTypes.map((piece) => {
-                const count = draft.buyCounts[piece.id]?.[mySide] ?? 0;
-                const price = piecePrice(piece);
-                const isKing = piece.tags?.includes("king");
-                return (
-                  <div key={piece.id} className="row" style={{ justifyContent: "space-between", marginBottom: 6 }}>
-                    <span>{piece.name} - cost {price}{isKing ? " (auto)" : ""}</span>
-                    <div className="row">
-                      <button disabled={isKing} onClick={() => void onDraftAdjust(piece.id, -1)}>-</button>
-                      <span>{count}</span>
-                      <button disabled={isKing} onClick={() => void onDraftAdjust(piece.id, 1)}>+</button>
-                    </div>
-                  </div>
-                );
-              })}
-              <button onClick={() => void onDraftConfirm()}>Confirm Buy Phase</button>
-            </div>
+            <DraftPieceMarket
+              pieces={setup.pieceTypes}
+              side={mySide}
+              budgetRemaining={myDraftBudget.remaining}
+              budgetMax={myDraftBudget.max}
+              getCount={(pieceId) => draft.buyCounts[pieceId]?.[mySide] ?? 0}
+              onAdjust={onDraftAdjust}
+              onConfirm={onDraftConfirm}
+              confirmLabel="Confirm Buy Phase"
+            />
           ) : null}
 
           {draft.stage === "place" ? (
@@ -400,8 +529,8 @@ export function OnlineGamePage() {
                             setPlacementSelectedPieceId(null);
                           }}
                         >
-                          <span>{piece.name} x{remain}</span>
-                          <img className="piece-img" src={typeAssetForSide(piece, mySide)} />
+                          <span>{draftPieceDisplayName(piece)} x{remain}</span>
+                          <PieceImage className="piece-img" src={typeAssetForSide(piece, mySide)} />
                         </button>
                       );
                     })
@@ -436,7 +565,7 @@ export function OnlineGamePage() {
                         className={`square ${squareColor(x, y)} ${selected ? "selected" : ""}`}
                         onClick={() => void onDraftSquareClick(displayX, displayY)}
                       >
-                        {piece ? <img className="piece-img" src={pieceAssetForSide(setup, piece)} /> : null}
+                        {piece ? <PieceImage className="piece-img" src={pieceAssetForSide(setup, piece)} /> : null}
                       </button>
                     );
                   });
@@ -446,12 +575,12 @@ export function OnlineGamePage() {
           ) : null}
 
           {!mySide || draft.activeSide !== mySide ? (
-            <p>Waiting for {draft.activeSide} to finish {draft.stage} phase...</p>
+            <p className="badge">Waiting for {draft.activeSide} to finish {draft.stage} phase...</p>
           ) : null}
         </>
       ) : null}
 
-      {game && state && game.status !== "draft" ? (
+      {game && setup && state && game.status !== "draft" ? (
         <>
           <div className="card" style={{ marginBottom: 12 }}>
             <div className="row" style={{ justifyContent: "space-between" }}>
@@ -500,7 +629,7 @@ export function OnlineGamePage() {
                       title={`${x},${y}`}
                     >
                       {piece && setup ? (
-                        <img className="piece-img" src={pieceAssetForSide(setup, piece)} />
+                        <PieceImage className="piece-img" src={pieceAssetForSide(setup, piece)} />
                       ) : null}
                     </button>
                   );
@@ -513,17 +642,20 @@ export function OnlineGamePage() {
                 <h3>Turn</h3>
                 <p>Side to move: <strong>{state.sides[state.currentTurnIndex]}</strong></p>
                 {state.status !== "ongoing" ? (
-                  <p>Winner side: <strong>{state.winnerSide ?? "n/a"}</strong></p>
+                  <p>{state.winnerSide ? <>Winner side: <strong>{state.winnerSide}</strong></> : <>Result: <strong>draw</strong></>}</p>
                 ) : null}
               </div>
 
               <div className="card" style={{ marginTop: 12 }}>
                 <h3>Move History</h3>
-                <ol>
+                <div className="move-history-compact">
                   {state.moveHistory.map((m, idx) => (
-                    <li key={`${m.pieceId}_${idx}`}>{moveLabel(m)}</li>
+                    <div className="move-history-row" key={`${m.pieceId}_${idx}`}>
+                      <span>{idx + 1}.</span>
+                      <span>{moveLabel(state, setup, m)}</span>
+                    </div>
                   ))}
-                </ol>
+                </div>
               </div>
             </div>
           </div>

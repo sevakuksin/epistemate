@@ -317,6 +317,21 @@ describe("existing core rules", () => {
     expect(g.winnerSide).toBe("white");
   });
 
+  it("stalemate with no legal moves is a draw", () => {
+    const setup = minimalSetup([
+      { instanceId: "wk", typeId: "king", side: "white", x: 4, y: 4, state: {} },
+      { instanceId: "n", typeId: "nietzsche", side: "black", x: 0, y: 0, state: {} },
+    ], [kingType, nietzscheType]);
+
+    let g = createGameFromSetup(setup, board);
+    const move = generatePseudoLegalMoves(g, "wk")[0];
+    expect(move).toBeDefined();
+    g = applyMove(g, move!);
+
+    expect(g.status).toBe("finished");
+    expect(g.winnerSide).toBeNull();
+  });
+
   it("castling still works", () => {
     const setup = minimalSetup([
       { instanceId: "wk", typeId: "king", side: "white", x: 4, y: 7, state: {} },
@@ -368,6 +383,20 @@ describe("new custom pieces", () => {
     const cap = generatePseudoLegalMoves(g, "v").find((m) => m.captureId === "t");
     expect(cap).toBeDefined();
     g = applyMove(g, cap!);
+    expect(g.pieces.get("v")?.state.stageIndex).toBe(1);
+  });
+
+  it("Vygotsky reaches knight stage on last rank", () => {
+    const setup = minimalSetup([
+      { instanceId: "v", typeId: "vygotsky", side: "white", x: 0, y: 1, state: { stageIndex: 0 } },
+      { instanceId: "bk", typeId: "king", side: "black", x: 7, y: 0, state: {} },
+    ], [vygotskyType, kingType]);
+
+    let g = createGameFromSetup(setup, board);
+    const push = generatePseudoLegalMoves(g, "v").find((m) => m.to.x === 0 && m.to.y === 0);
+    expect(push).toBeDefined();
+    g = applyMove(g, push!);
+
     expect(g.pieces.get("v")?.state.stageIndex).toBe(1);
   });
 

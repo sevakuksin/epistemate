@@ -108,14 +108,14 @@ export function VsPlayerPage() {
 
   return (
     <div className="page">
-      <div className="row" style={{ justifyContent: "space-between" }}>
-        <h1>Play Online</h1>
+      <div className="page-header">
+        <div><h1 className="page-title">Play Online</h1><p className="subtitle">Friends, invites, and active games in one lobby.</p></div>
         <Link to="/">Back to menu</Link>
       </div>
 
-      {status ? <p>{status}</p> : null}
+      {status ? <p className="badge warn">{status}</p> : null}
 
-      <div className="card" style={{ marginBottom: 12 }}>
+      <div className="card card-elevated" style={{ marginBottom: 12 }}>
         <h3>Invite Mode</h3>
         <div className="row">
           <button onClick={() => setMode("chess")} disabled={mode === "chess"}>Chess</button>
@@ -150,7 +150,7 @@ export function VsPlayerPage() {
         </ul>
       </div>
 
-      <div className="row" style={{ alignItems: "flex-start" }}>
+      <div className="grid-2" style={{ alignItems: "stretch" }}>
         <div className="card" style={{ flex: 1 }}>
           <h3>Friends</h3>
           <ul>
@@ -158,7 +158,7 @@ export function VsPlayerPage() {
               const online = onlineUserIds.has(f.id);
               return (
                 <li key={f.id} className="row" style={{ justifyContent: "space-between" }}>
-                  <span>{f.username} {online ? "(online)" : "(offline)"}</span>
+                  <span>{f.username} <span className={`badge ${online ? "ok" : "warn"}`}>{online ? "online" : "offline"}</span></span>
                   <button onClick={() => void inviteFriend(f.id)}>Invite ({mode})</button>
                 </li>
               );
@@ -189,7 +189,7 @@ export function VsPlayerPage() {
         </div>
       </div>
 
-      <div className="row" style={{ alignItems: "flex-start" }}>
+      <div className="grid-2" style={{ alignItems: "stretch" }}>
         <div className="card" style={{ flex: 1 }}>
           <h3>Incoming Game Invites</h3>
           <ul>
