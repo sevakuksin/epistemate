@@ -40,6 +40,8 @@ type AuthRequest = express.Request & { userId?: string };
 type GameMode = "chess" | "epistemate" | "custom";
 
 const PORT = Number(process.env.PORT) || 3001;
+/** Bind address. Default loopback so nginx can proxy without exposing the port publicly. Set HOST=0.0.0.0 for LAN/dev if needed. */
+const HOST = process.env.HOST ?? "127.0.0.1";
 const SESSION_DAYS = 7;
 const INVITE_EXPIRY_MINUTES = 15;
 const USERNAME_RE = /^[A-Za-z0-9_-]{3,20}$/;
@@ -1209,6 +1211,6 @@ app.get("/api/setup-bundle/:id", requireAuth, (req: AuthRequest, res) => {
   res.json({ setup, board, pieceTypes: setup.pieceTypes });
 });
 
-httpServer.listen(PORT, () => {
-  console.log(`[cv-server] http://localhost:${PORT}`);
+httpServer.listen(PORT, HOST, () => {
+  console.log(`[cv-server] listening on http://${HOST}:${PORT}`);
 });
