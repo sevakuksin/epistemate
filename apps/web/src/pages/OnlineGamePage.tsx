@@ -4,6 +4,7 @@ import type { CompactMove, GameState } from "@cv/engine";
 import { deserializeGame, generatePseudoLegalMoves } from "@cv/engine";
 import type { GameSetup, PieceInstance, PieceTypeDefinition } from "@cv/shared";
 import { api, type GameRecord, type OnlineDraftState } from "../api";
+import { BoardShell } from "../components/BoardShell";
 import { PieceImage } from "../components/PieceImage";
 import { DraftPieceMarket } from "../components/DraftPieceMarket";
 import { wsClient } from "../realtime/wsClient";
@@ -507,49 +508,41 @@ export function OnlineGamePage() {
           ) : null}
 
           {draft.stage === "place" ? (
-            <div className="row" style={{ alignItems: "flex-start" }}>
-              <div style={{ minWidth: 300 }}>
-                <div className="card">
-                  <h3>Pool</h3>
-                  {mySide && draft.activeSide === mySide ? (
-                    setup.pieceTypes.map((piece) => {
-                      const required = draft.buyCounts[piece.id]?.[mySide] ?? 0;
-                      const placed = draft.placements[mySide].filter((p) => p.typeId === piece.id).length;
-                      const remain = Math.max(0, required - placed);
-                      if (remain <= 0) return null;
-                      const selected = poolSelectedTypeId === piece.id;
-                      return (
-                        <button
-                          key={piece.id}
-                          type="button"
-                          className="row"
-                          style={{ width: "100%", justifyContent: "space-between", marginBottom: 6, border: selected ? "2px solid #2f6fed" : undefined }}
-                          onClick={() => {
-                            setPoolSelectedTypeId(piece.id);
-                            setPlacementSelectedPieceId(null);
-                          }}
-                        >
-                          <span>{draftPieceDisplayName(piece)} x{remain}</span>
-                          <PieceImage className="piece-img" src={typeAssetForSide(piece, mySide)} />
-                        </button>
-                      );
-                    })
-                  ) : (
-                    <p>Waiting for {draft.activeSide} to place pieces...</p>
-                  )}
-                </div>
+            <div className="row game-layout" style={{ alignItems: "flex-start" }}>
+              <div className="game-sidebar card" style={{ minWidth: 280 }}>
+                <h3 style={{ marginTop: 0 }}>Pool</h3>
+                {mySide && draft.activeSide === mySide ? (
+                  setup.pieceTypes.map((piece) => {
+                    const required = draft.buyCounts[piece.id]?.[mySide] ?? 0;
+                    const placed = draft.placements[mySide].filter((p) => p.typeId === piece.id).length;
+                    const remain = Math.max(0, required - placed);
+                    if (remain <= 0) return null;
+                    const selected = poolSelectedTypeId === piece.id;
+                    return (
+                      <button
+                        key={piece.id}
+                        type="button"
+                        className="row"
+                        style={{ width: "100%", justifyContent: "space-between", marginBottom: 6, border: selected ? "2px solid #2f6fed" : undefined }}
+                        onClick={() => {
+                          setPoolSelectedTypeId(piece.id);
+                          setPlacementSelectedPieceId(null);
+                        }}
+                      >
+                        <span>{draftPieceDisplayName(piece)} ×{remain}</span>
+                        <PieceImage className="piece-img" src={typeAssetForSide(piece, mySide)} />
+                      </button>
+                    );
+                  })
+                ) : (
+                  <p>Waiting for {draft.activeSide} to place pieces...</p>
+                )}
                 {mySide && draft.activeSide === mySide ? (
                   <button style={{ marginTop: 8 }} onClick={() => void onDraftConfirm()}>Confirm Placement</button>
                 ) : null}
               </div>
 
-              <div
-                className="board"
-                style={{
-                  gridTemplateColumns: `repeat(${boardSize.width}, 56px)`,
-                  width: boardSize.width * 56,
-                }}
-              >
+              <BoardShell cols={boardSize.width} rows={boardSize.height}>
                 {Array.from({ length: boardSize.height }).flatMap((_, rowIndex) => {
                   const displayY = rowIndex;
                   return Array.from({ length: boardSize.width }).map((__, displayX) => {
@@ -570,7 +563,7 @@ export function OnlineGamePage() {
                     );
                   });
                 })}
-              </div>
+              </BoardShell>
             </div>
           ) : null}
 
@@ -597,14 +590,8 @@ export function OnlineGamePage() {
             </div>
           </div>
 
-          <div className="row" style={{ alignItems: "flex-start" }}>
-            <div
-              className="board"
-              style={{
-                gridTemplateColumns: `repeat(${state.board.width}, 56px)`,
-                width: state.board.width * 56,
-              }}
-            >
+          <div className="row game-layout" style={{ alignItems: "flex-start" }}>
+            <BoardShell cols={state.board.width} rows={state.board.height}>
               {Array.from({ length: state.board.height }).flatMap((_, rowIndex) => {
                 const displayY = rowIndex;
                 return Array.from({ length: state.board.width }).map((__, displayX) => {
@@ -635,9 +622,9 @@ export function OnlineGamePage() {
                   );
                 });
               })}
-            </div>
+            </BoardShell>
 
-            <div style={{ minWidth: 320 }}>
+            <div className="game-sidebar" style={{ minWidth: 280 }}>
               <div className="card">
                 <h3>Turn</h3>
                 <p>Side to move: <strong>{state.sides[state.currentTurnIndex]}</strong></p>

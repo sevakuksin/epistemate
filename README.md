@@ -18,31 +18,19 @@ Local browser-based pilot for building and playing custom chess-like variants.
 
 ## Installation
 
-This repo does **not** use npm workspaces. Dependencies live in each package (`packages/shared`, `packages/engine`, `apps/server`, `apps/web`). A single `npm install` at the **repository root** only installs the root devDependencies (e.g. `concurrently`) — it does **not** install `zod` in `packages/shared`, link `@cv/engine` under `apps/server`, or set up the other packages.
+### Requirements
 
-**Always run bootstrap after clone** (and after `git pull` when dependencies change):
+- Linux VPS (Ubuntu/Debian) for production deployment, or WSL/Linux for local dev
+- Domain pointing to the server (**A record**) when using HTTPS
+- **Node.js** ≥ 18 recommended
+- **nginx** installed (production)
+- **sudo** access on the VPS
 
-```bash
-cd ~/chess   # or your clone path
-npm install          # optional: root tooling (concurrently)
-npm run bootstrap    # required: npm install in each package in order
-```
+### Monorepo: bootstrap (not plain `npm install`)
 
-`npm run bootstrap` runs `npm install` inside each of `packages/shared`, `packages/engine`, `apps/server`, and `apps/web` (see `scripts/bootstrap.mjs`). This avoids Windows/WSL symlink issues with workspaces and matches how CI and production builds should install.
+This repo does **not** use npm workspaces. Dependencies live in each package (`packages/shared`, `packages/engine`, `apps/server`, `apps/web`). A single `npm install` at the **repository root** only installs root devDependencies — it does **not** install per-package deps (e.g. `zod` in shared, `@cv/engine` in server).
 
-Without bootstrap, `npm run build` usually fails early (for example `Cannot find module 'zod'` in `packages/shared`, or `Cannot find module '@cv/engine'` when compiling `apps/server`) because those packages never received their own `node_modules`.
-
-**Production build** (from repo root; order matters — shared → engine → server → web):
-
-```bash
-npm run bootstrap
-npm run build
-```
-
-- Web static output: `apps/web/dist/`
-- Server output: `apps/server/dist/` — run with `node apps/server/dist/index.js` (set `PORT`, `REGISTRATION_CODE`, etc. as needed). By default the process listens on **`127.0.0.1`** only (not the public interface); nginx should proxy to it. Override with **`HOST=0.0.0.0`** if you need LAN access without nginx.
-
-**VPS / server:** Clone the repo, then **`npm run bootstrap` before `npm run build`**. If you only `npm install` at the root, builds can fail with missing modules (e.g. `zod` in shared, `@cv/engine` in server) because those packages never got their own `node_modules`. If `apps/server` fails to resolve `@cv/engine`, remove `apps/server/node_modules` and run `cd apps/server && npm install`, or run a full clean reinstall below.
+**Always run `npm run bootstrap`** after clone and after `git pull` when dependencies change. It runs `npm install` in each package in order (see `scripts/bootstrap.mjs`). Without it, `npm run build` often fails with missing modules.
 
 **Clean reinstall** (if installs are corrupted):
 
@@ -52,23 +40,214 @@ npm install
 npm run bootstrap
 ```
 
-## Run Locally
+If `apps/server` builds but cannot resolve `@cv/engine`, remove `packages/engine/node_modules` and reinstall after `packages/shared` is built, or run the clean reinstall above.
 
-Use WSL/Linux Node when working in `~/chess`.
+---
+
+### Deploy on Linux VPS (Ubuntu/Debian)
+
+#### 1. Clone repository
 
 ```bash
-cd ~/chess
+sudo mkdir -p /opt
+cd /opt
+sudo git clone https://github.com/YOUR_ORG/chess.git epistemate
+sudo chown -R "$USER:$USER" /opt/epistemate
+cd /opt/epistemate
+```
+
+#### 2. Install dependencies and build
+
+This project uses **bootstrap** (monorepo), not a plain root `npm install`.
+
+```bash
+npm run bootstrap
+npm run build
+```
+
+Build outputs:
+
+- `apps/web/dist` — frontend static files
+- `apps/server/dist` — backend
+
+Run builds **as a normal user** with ownership of `/opt/epistemate` (not `sudo npm run …`).
+
+#### 3. Prepare data directory
+
+The SQLite database is created under `data/` relative to the process working directory.
+
+```bash
+sudo mkdir -p /opt/epistemate/data
+sudo chown -R "$USER:$USER" /opt/epistemate/data
+```
+
+(Optional, if the rest of the tree should be owned by the deploy user: `sudo chown -R "$USER:$USER" /opt/epistemate`.)
+
+#### 4. Configure backend (systemd)
+
+Create `/etc/systemd/system/epistemate.service`:
+
+```ini
+[Unit]
+Description=Epistemate Node API
+After=network.target
+
+[Service]
+User=YOUR_USERNAME
+Group=YOUR_USERNAME
+WorkingDirectory=/opt/epistemate
+Environment=NODE_ENV=production
+Environment=PORT=3001
+Environment=HOST=127.0.0.1
+Environment=REGISTRATION_CODE=your-secret
+ExecStart=/usr/bin/node /opt/epistemate/apps/server/dist/index.js
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Replace `YOUR_USERNAME` and `REGISTRATION_CODE`. The server listens on **`127.0.0.1`** only by default; use **`Environment=HOST=0.0.0.0`** only if you need the API reachable without nginx.
+
+Enable and start:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now epistemate
+```
+
+Check:
+
+```bash
+sudo systemctl status epistemate
+journalctl -u epistemate -n 50 --no-pager
+```
+
+Verify the backend is bound locally:
+
+```bash
+ss -tulpn | grep 3001
+```
+
+Expected: `127.0.0.1:3001` (not `*:3001`).
+
+#### 5. Configure nginx
+
+Create `/etc/nginx/sites-available/epistemate`:
+
+```nginx
+server {
+    listen 80;
+    listen [::]:80;
+    server_name epistemate.yourdomain.com;
+
+    root /opt/epistemate/apps/web/dist;
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /ws {
+        proxy_pass http://127.0.0.1:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_read_timeout 86400;
+    }
+}
+```
+
+Enable the site:
+
+```bash
+sudo ln -sf /etc/nginx/sites-available/epistemate /etc/nginx/sites-enabled/
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+#### 6. DNS and firewall
+
+- Add an **A record**: `epistemate.yourdomain.com` → your VPS public IP.
+- Allow HTTP and HTTPS; **do not** expose port **3001** publicly.
+
+```bash
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+```
+
+#### 7. HTTPS (Let’s Encrypt)
+
+```bash
+sudo apt update
+sudo apt install certbot python3-certbot-nginx
+sudo certbot --nginx -d epistemate.yourdomain.com
+```
+
+Certbot will configure TLS, add HTTP→HTTPS redirect, and set up renewal.
+
+#### 8. Test
+
+Backend (from the server):
+
+```bash
+curl -sS http://127.0.0.1:3001/api/health
+```
+
+Frontend:
+
+```bash
+curl -I http://epistemate.yourdomain.com
+curl -I https://epistemate.yourdomain.com
+```
+
+#### Architecture (production)
+
+- **nginx** handles public traffic on ports **80** and **443**.
+- **Frontend** is served from the static build: `apps/web/dist`.
+- **Backend** runs under **systemd** on **`127.0.0.1:3001`**.
+- **nginx** proxies **`/api`** and **`/ws`** to the backend.
+
+#### After code changes
+
+```bash
+cd /opt/epistemate
+git pull
+npm run bootstrap
+npm run build
+sudo systemctl restart epistemate
+```
+
+If something breaks: `journalctl -u epistemate -f` and `sudo nginx -t`.
+
+---
+
+### Run locally (development)
+
+Use WSL or Linux Node (see **Notes About WSL vs Windows Node** below).
+
+```bash
+cd /path/to/chess
 npm install
 npm run bootstrap
 npm run dev
 ```
 
-Open:
-
 - Web: [http://localhost:5173](http://localhost:5173)
 - API: [http://localhost:3001/api/health](http://localhost:3001/api/health)
 
-The dev script runs the Vite dev server with proxies to the API; the Vite config proxies `/api` and `/ws` to the server on port 3001.
+Vite proxies `/api` and `/ws` to the backend on port 3001.
 
 ## New Piece Catalog (Default)
 

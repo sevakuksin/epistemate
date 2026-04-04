@@ -4,6 +4,7 @@ import { applyMove, createGameFromSetup, generatePseudoLegalMoves } from "@cv/en
 import type { BoardDefinition, GameSetup, PieceInstance, PieceTypeDefinition } from "@cv/shared";
 import { Link } from "react-router-dom";
 import { api } from "../api";
+import { BoardShell } from "../components/BoardShell";
 import { PieceImage } from "../components/PieceImage";
 import { DraftPieceMarket } from "../components/DraftPieceMarket";
 import { useAuth } from "../state/auth";
@@ -23,10 +24,6 @@ type DraftState = {
   buyCounts: BuyCounts;
   placements: Record<Side, PieceInstance[]>;
 };
-
-type DragPayload =
-  | { kind: "pool"; typeId: string; side: Side }
-  | { kind: "placed"; instanceId: string; side: Side };
 
 const CLASSIC_SETUP_ID = "setup_classic_8x8";
 const EPISTEMATE_SETUP_ID = "setup_epistemate";
@@ -108,17 +105,6 @@ function coordFromDisplay(
   return { x: width - 1 - displayX, y: height - 1 - displayY };
 }
 
-function readDragPayload(raw: string): DragPayload | null {
-  try {
-    const parsed = JSON.parse(raw) as DragPayload;
-    if (parsed.kind !== "pool" && parsed.kind !== "placed") return null;
-    if (parsed.side !== "white" && parsed.side !== "black") return null;
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
 export function HotSeatPage() {
   const { user } = useAuth();
   const [setups, setSetups] = useState<GameSetup[]>([]);
@@ -133,6 +119,7 @@ export function HotSeatPage() {
   const [playMode, setPlayMode] = useState<PlayMode | null>(null);
   const [draft, setDraft] = useState<DraftState | null>(null);
   const [placementSelectedPieceId, setPlacementSelectedPieceId] = useState<string | null>(null);
+  const [poolSelectedTypeId, setPoolSelectedTypeId] = useState<string | null>(null);
   const [boardFlipped, setBoardFlipped] = useState(false);
   const [deferTurnFlipUntil, setDeferTurnFlipUntil] = useState(0);
 
@@ -264,6 +251,7 @@ export function HotSeatPage() {
     setSelectedPieceId(null);
     setLegalMoves([]);
     setPlacementSelectedPieceId(null);
+    setPoolSelectedTypeId(null);
     setBoardFlipped(false);
     setDeferTurnFlipUntil(0);
     setError("");
@@ -296,6 +284,7 @@ export function HotSeatPage() {
       setActiveSetup(null);
       setDraft(null);
       setPlacementSelectedPieceId(null);
+      setPoolSelectedTypeId(null);
       setBoardFlipped(false);
       setDeferTurnFlipUntil(0);
     } catch {
@@ -320,6 +309,7 @@ export function HotSeatPage() {
     setSelectedPieceId(null);
     setLegalMoves([]);
     setPlacementSelectedPieceId(null);
+    setPoolSelectedTypeId(null);
     setBoardFlipped(false);
     setDeferTurnFlipUntil(0);
     setError("");
@@ -354,6 +344,7 @@ export function HotSeatPage() {
     }
     setDraft((prev) => (prev ? { ...prev, stage: "place" } : prev));
     setPlacementSelectedPieceId(null);
+    setPoolSelectedTypeId(null);
     setBoardFlipped(false);
     setDeferTurnFlipUntil(0);
     setError("");
@@ -362,63 +353,7 @@ export function HotSeatPage() {
   function backToBuy() {
     setDraft((prev) => (prev ? { ...prev, stage: "buy" } : prev));
     setPlacementSelectedPieceId(null);
-  }
-
-  function onSquareDrop(x: number, y: number, rawPayload: string) {
-    if (!draft || !bundle || draft.stage !== "place") return;
-    const payload = readDragPayload(rawPayload);
-    if (!payload) return;
-
-    const side = draft.activeSide;
-    if (payload.side !== side) return;
-    if (!isPlacementRow(side, y, bundle.board.height)) return;
-
-    const occupant = draftAllPiecesOnBoard.find((p) => p.x === x && p.y === y);
-    if (payload.kind === "pool") {
-      if (occupant) return;
-      const remain = remainingToPlace(side, payload.typeId);
-      if (remain <= 0) return;
-      const index = placedCount(side, payload.typeId) + 1;
-      const instanceId = `${side}_${payload.typeId}_${index}`;
-      const newPiece: PieceInstance = {
-        instanceId,
-        typeId: payload.typeId,
-        side,
-        x,
-        y,
-        state: {},
-      };
-      setDraft((prev) => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          placements: {
-            ...prev.placements,
-            [side]: [...prev.placements[side], newPiece],
-          },
-        };
-      });
-      return;
-    }
-
-    if (payload.kind === "placed") {
-      const current = draft.placements[side].find((p) => p.instanceId === payload.instanceId);
-      if (!current) return;
-      if (occupant && occupant.instanceId !== current.instanceId) return;
-      setDraft((prev) => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          placements: {
-            ...prev.placements,
-            [side]: prev.placements[side].map((p) =>
-              p.instanceId === payload.instanceId ? { ...p, x, y } : p
-            ),
-          },
-        };
-      });
-      setPlacementSelectedPieceId(null);
-    }
+    setPoolSelectedTypeId(null);
   }
 
   function onPlacementSquareClick(x: number, y: number) {
@@ -428,6 +363,7 @@ export function HotSeatPage() {
     const occupant = draftAllPiecesOnBoard.find((p) => p.x === x && p.y === y);
 
     if (occupant && occupant.side === side) {
+      setPoolSelectedTypeId(null);
       if (placementSelectedPieceId === occupant.instanceId) {
         setDraft((prev) => {
           if (!prev) return prev;
@@ -446,24 +382,52 @@ export function HotSeatPage() {
       return;
     }
 
-    if (!placementSelectedPieceId) return;
-    if (!isPlacementRow(side, y, bundle.board.height)) return;
     if (occupant) return;
+    if (!isPlacementRow(side, y, bundle.board.height)) return;
 
-    setDraft((prev) => {
-      if (!prev) return prev;
-      return {
-        ...prev,
-        placements: {
-          ...prev.placements,
-          [side]: prev.placements[side].map((p) =>
-            p.instanceId === placementSelectedPieceId ? { ...p, x, y } : p
-          ),
-        },
+    if (placementSelectedPieceId) {
+      setDraft((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          placements: {
+            ...prev.placements,
+            [side]: prev.placements[side].map((p) =>
+              p.instanceId === placementSelectedPieceId ? { ...p, x, y } : p
+            ),
+          },
+        };
+      });
+      setPlacementSelectedPieceId(null);
+      setError("");
+      return;
+    }
+
+    if (poolSelectedTypeId) {
+      const remain = remainingToPlace(side, poolSelectedTypeId);
+      if (remain <= 0) return;
+      const index = placedCount(side, poolSelectedTypeId) + 1;
+      const instanceId = `${side}_${poolSelectedTypeId}_${index}`;
+      const newPiece: PieceInstance = {
+        instanceId,
+        typeId: poolSelectedTypeId,
+        side,
+        x,
+        y,
+        state: {},
       };
-    });
-    setPlacementSelectedPieceId(null);
-    setError("");
+      setDraft((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          placements: {
+            ...prev.placements,
+            [side]: [...prev.placements[side], newPiece],
+          },
+        };
+      });
+      setError("");
+    }
   }
 
   function confirmPlacementAndAdvance() {
@@ -490,6 +454,7 @@ export function HotSeatPage() {
           : prev
       );
       setPlacementSelectedPieceId(null);
+      setPoolSelectedTypeId(null);
       setError("");
       return;
     }
@@ -505,6 +470,7 @@ export function HotSeatPage() {
     setState(createGameFromSetup(runtimeSetup, bundle.board));
     setDraft(null);
     setPlacementSelectedPieceId(null);
+    setPoolSelectedTypeId(null);
     setBoardFlipped(false);
     setDeferTurnFlipUntil(0);
     setError("");
@@ -638,32 +604,39 @@ export function HotSeatPage() {
             />
           ) : (
             <>
-              <div className="row" style={{ alignItems: "flex-start" }}>
-                <div style={{ minWidth: 320 }}>
-                  <h4>Pieces to place</h4>
+              <p className="subtitle" style={{ marginBottom: 8 }}>
+                Select a piece type in the pool, then tap an empty square on your first two ranks. Tap one of your placed pieces to select it for moving; tap the same piece again to remove it from the board.
+              </p>
+              <div className="row game-layout" style={{ alignItems: "flex-start" }}>
+                <div className="game-sidebar card" style={{ minWidth: 280 }}>
+                  <h4 style={{ marginTop: 0 }}>Pool</h4>
                   {bundle.setup.pieceTypes.map((piece) => {
                     const remaining = remainingToPlace(draft.activeSide, piece.id);
                     if (remaining <= 0) return null;
+                    const selected = poolSelectedTypeId === piece.id;
                     return (
-                      <div key={piece.id} className="card" style={{ marginBottom: 6, padding: 8 }} draggable onDragStart={(e) => {
-                        const payload: DragPayload = { kind: "pool", typeId: piece.id, side: draft.activeSide };
-                        e.dataTransfer.setData("text/plain", JSON.stringify(payload));
-                      }}>
-                        <div className="row" style={{ justifyContent: "space-between" }}>
-                          <span>{draftPieceDisplayName(piece)} x{remaining}</span>
-                          <PieceImage className="piece-img" src={typeAssetForSide(piece, draft.activeSide)} />
-                        </div>
-                      </div>
+                      <button
+                        key={piece.id}
+                        type="button"
+                        className="row"
+                        style={{
+                          width: "100%",
+                          justifyContent: "space-between",
+                          marginBottom: 6,
+                          border: selected ? "2px solid #2f6fed" : undefined,
+                        }}
+                        onClick={() => {
+                          setPoolSelectedTypeId(piece.id);
+                          setPlacementSelectedPieceId(null);
+                        }}
+                      >
+                        <span>{draftPieceDisplayName(piece)} ×{remaining}</span>
+                        <PieceImage className="piece-img" src={typeAssetForSide(piece, draft.activeSide)} />
+                      </button>
                     );
                   })}
                 </div>
-                <div
-                  className="board"
-                  style={{
-                    gridTemplateColumns: `repeat(${bundle.board.width}, 56px)`,
-                    width: bundle.board.width * 56,
-                  }}
-                >
+                <BoardShell cols={bundle.board.width} rows={bundle.board.height}>
                   {Array.from({ length: bundle.board.height }).flatMap((_, rowIndex) => {
                     const displayY = rowIndex;
                     return Array.from({ length: bundle.board.width }).map((__, displayX) => {
@@ -677,17 +650,6 @@ export function HotSeatPage() {
                           type="button"
                           className={`square ${squareColor(x, y)}`}
                           onClick={() => onPlacementSquareClick(x, y)}
-                          draggable={Boolean(piece && piece.side === draft.activeSide)}
-                          onDragStart={(e) => {
-                            if (!piece || piece.side !== draft.activeSide) return;
-                            const payload: DragPayload = { kind: "placed", instanceId: piece.instanceId, side: draft.activeSide };
-                            e.dataTransfer.setData("text/plain", JSON.stringify(payload));
-                          }}
-                          onDragOver={(e) => e.preventDefault()}
-                          onDrop={(e) => {
-                            e.preventDefault();
-                            onSquareDrop(x, y, e.dataTransfer.getData("text/plain"));
-                          }}
                         >
                           {piece ? (
                             <PieceImage
@@ -700,7 +662,7 @@ export function HotSeatPage() {
                       );
                     });
                   })}
-                </div>
+                </BoardShell>
               </div>
 
               <div className="row" style={{ marginTop: 8 }}>
@@ -721,8 +683,8 @@ export function HotSeatPage() {
       ) : null}
 
       {state && bundle && activeSetup ? (
-        <div className="row" style={{ alignItems: "flex-start" }}>
-          <div className="board" style={{ gridTemplateColumns: `repeat(${bundle.board.width}, 56px)`, width: bundle.board.width * 56 }}>
+        <div className="row game-layout" style={{ alignItems: "flex-start" }}>
+          <BoardShell cols={bundle.board.width} rows={bundle.board.height}>
             {Array.from({ length: bundle.board.height }).flatMap((_, rowIndex) => {
               const displayY = rowIndex;
               return Array.from({ length: bundle.board.width }).map((__, displayX) => {
@@ -745,9 +707,9 @@ export function HotSeatPage() {
                 );
               });
             })}
-          </div>
+          </BoardShell>
 
-          <div style={{ minWidth: 320 }}>
+          <div className="game-sidebar" style={{ minWidth: 280 }}>
             <div className="card">
               <h3>Turn</h3>
               <p>Side to move: <strong>{state.sides[state.currentTurnIndex]}</strong></p>

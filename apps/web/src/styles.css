@@ -247,6 +247,49 @@ a:focus-visible {
   box-shadow: none;
 }
 
+/* Responsive board: cells shrink when the container is narrower than N×56px */
+.board-wrap {
+  container-type: inline-size;
+  container-name: game-board;
+  width: 100%;
+  max-width: max-content;
+}
+
+.board.board-fluid {
+  /* Fallback when container query units are unavailable */
+  --cell: 56px;
+  --cell: min(56px, calc(100cqw / var(--board-cols, 8)));
+  max-width: 100%;
+}
+
+.board.board-fluid .square {
+  width: var(--cell);
+  height: var(--cell);
+  min-width: 0;
+  min-height: 0;
+}
+
+.board.board-fluid .piece-img {
+  width: calc(var(--cell) * 0.75);
+  height: calc(var(--cell) * 0.75);
+}
+
+.game-layout {
+  align-items: flex-start;
+}
+
+@media (max-width: 900px) {
+  .game-layout {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .game-sidebar {
+    min-width: 0 !important;
+    width: 100%;
+  }
+}
+
 .square {
   width: 56px;
   height: 56px;
@@ -260,6 +303,7 @@ a:focus-visible {
   appearance: none;
   box-shadow: none;
   background: transparent;
+  touch-action: manipulation;
 }
 
 .square.light {
