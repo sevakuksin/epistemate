@@ -92,10 +92,22 @@ function pieceAttacksSquare(state: GameState, piece: PieceInstance, targetX: num
   return false;
 }
 
-function isSquareAttackedByOpponent(state: GameState, side: string, x: number, y: number): boolean {
+/** True if any piece not on `side` attacks square (x,y). Used for king safety and NPC “check” detection. */
+export function isSquareAttackedByOpponent(state: GameState, side: string, x: number, y: number): boolean {
   for (const p of state.pieces.values()) {
     if (p.side === side) continue;
     if (pieceAttacksSquare(state, p, x, y)) return true;
+  }
+  return false;
+}
+
+/** True if the king-tagged piece for `kingSide` is on a square attacked by the opponent. */
+export function isKingSquareAttacked(state: GameState, kingSide: string): boolean {
+  for (const p of state.pieces.values()) {
+    if (p.side !== kingSide) continue;
+    const t = state.pieceTypes.get(p.typeId);
+    if (!t?.tags?.includes("king")) continue;
+    return isSquareAttackedByOpponent(state, kingSide, p.x, p.y);
   }
   return false;
 }

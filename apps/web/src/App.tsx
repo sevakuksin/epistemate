@@ -2,8 +2,8 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { LoginPage } from "./pages/LoginPage";
 import { MenuPage } from "./pages/MenuPage";
 import { HotSeatPage } from "./pages/HotSeatPage";
+import { VsNpcPage } from "./pages/VsNpcPage";
 import { CreatePage } from "./pages/CreatePage";
-import { PlaceholderPage } from "./pages/PlaceholderPage";
 import { VsPlayerPage } from "./pages/VsPlayerPage";
 import { OnlineGamePage } from "./pages/OnlineGamePage";
 import { RulebookPage } from "./pages/RulebookPage";
@@ -70,7 +70,11 @@ export function App() {
       />
       <Route
         path="/play/vs-npc"
-        element={<PlaceholderPage title="Vs NPC" message="Coming next (NPC/AI)." />}
+        element={
+          <Protected>
+            <VsNpcPage />
+          </Protected>
+        }
       />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

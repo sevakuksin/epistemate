@@ -52,7 +52,7 @@ export function MenuPage() {
           path="/play/vs-player"
           description="Live online multiplayer with invites, draft, and realtime sync."
         />
-        <MenuCard title="Vs NPC" path="/play/vs-npc" description="Play against AI (placeholder)." comingSoon />
+        <MenuCard title="Vs NPC" path="/play/vs-npc" description="Play against the in-browser minimax AI (you are White)." />
         <MenuCard title="Create" path="/create" description="Define piece types, boards, and setups." />
         <MenuCard title="Rulebook" path="/rulebook" description="Piece rules, prices, and budget mode." />
       </div>

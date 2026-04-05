@@ -118,6 +118,11 @@ function maybeApplyFreudSlip(state: GameState, move: CompactMove, piece: PieceIn
   return legal[idx];
 }
 
+export type ApplyMoveOptions = {
+  /** When true, Freud slip is not applied (deterministic search / NPC lookahead). */
+  skipRandomSlip?: boolean;
+};
+
 function applyPieceStateUpdates(
   state: GameState,
   before: PieceInstance,
@@ -207,7 +212,7 @@ function hasAnyLegalMovesForCurrentSide(state: GameState): boolean {
   return false;
 }
 
-export function applyMove(state: GameState, move: CompactMove): GameState {
+export function applyMove(state: GameState, move: CompactMove, options?: ApplyMoveOptions): GameState {
   if (state.status !== "ongoing") return state;
   if (!validateMove(state, move)) {
     throw new Error("Illegal move");
@@ -216,7 +221,8 @@ export function applyMove(state: GameState, move: CompactMove): GameState {
   const piece = state.pieces.get(move.pieceId);
   if (!piece) throw new Error("Missing piece");
 
-  const effectiveMove = maybeApplyFreudSlip(state, move, piece);
+  const effectiveMove =
+    options?.skipRandomSlip === true ? move : maybeApplyFreudSlip(state, move, piece);
   if (!validateMove(state, effectiveMove)) {
     throw new Error("Illegal move after slip resolution");
   }
